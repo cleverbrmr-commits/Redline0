@@ -17,8 +17,6 @@ const {
   StringSelectMenuOptionBuilder,
   EmbedBuilder,
   AttachmentBuilder,
-  ChannelType,
-  Colors,
 } = require("discord.js");
 
 const client = new Client({
@@ -26,92 +24,666 @@ const client = new Client({
 });
 
 const DATA_FILE = path.join(__dirname, "modules.json");
-const PRISON_FILE = path.join(__dirname, "prison-state.json");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
-const BACKUPS_DIR = path.join(__dirname, "backups");
-const PRISON_ROLE_NAME = "Prisoner";
-const DOWNLOAD_COOLDOWN_MS = 8000;
-const MAX_MENU_OPTIONS = 25;
 
-const CATEGORY_OPTIONS = ["Utility", "PvP", "Visual", "Performance", "Beta"];
-const VISIBILITY_OPTIONS = ["public", "hidden"];
-const STATUS_OPTIONS = ["Stable", "Testing", "Deprecated", "Hotfix"];
+const DEFAULT_CATEGORIES = ["Utility", "PvP", "Visual", "Performance", "Beta"];
 
-const BRAND = {
-  name: "REDLINE CLIENT HUB",
-  footer: "REDLINE • Clean drops. Fast access.",
-  emojiPool: ["🔥", "⚡", "🩸", "🧨", "🚀", "🛠️"],
-  colors: [
-    Colors.Red,
-    Colors.DarkRed,
-    Colors.OrangeRed,
-    Colors.Gold,
-    Colors.Blurple,
-    Colors.DarkButNotBlack,
-  ],
-};
+async function ensureStorage() {
+  await fsp.mkdir(UPLOADS_DIR, { recursive: true });
 
-const downloadCooldowns = new Map();
-
-function pick(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function brandColor() {
-  return pick(BRAND.colors);
-}
-
-function brandEmoji() {
-  return pick(BRAND.emojiPool);
-}
-
-function prettyError(err) {
-  return err?.message || "Something went wrong.";
-}
-
-function validateEnv() {
-  const required = ["DISCORD_TOKEN", "CLIENT_ID", "GUILD_ID"];
-  const missing = required.filter((key) => !process.env[key]);
-
-  if (missing.length) {
-    throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
+  try {
+    await fsp.access(DATA_FILE);
+  } catch {
+    await fsp.writeFile(DATA_FILE, "{}", "utf8");
   }
 }
 
+async function loadModules() {
+  const raw = await fsp.readFile(DATA_FILE, "utf8");
+  return JSON.parse(raw || "{}");
+}
+
+async function saveModules(modules) {
+  await fsp.writeFile(DATA_FILE, JSON.stringify(modules, null, 2), "utf8");
+}
+
 function slugify(input) {
-  return String(input || "")
+  return input
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-+/g, "-");
+    .replace(/^-+|-+$/g, "");
 }
 
-function trimText(str, max = 100) {
-  const text = String(str || "");
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+async function downloadFile(url, destinationPath) {
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    throw new Error(`Failed to download file: ${res.status} ${res.statusText}`);
+  }
+
+  const buffer = Buffer.from(await res.arrayBuffer());
+  await fsp.writeFile(destinationPath, buffer);
 }
 
-function normalizeCategory(value) {
-  return CATEGORY_OPTIONS.find((entry) => entry.toLowerCase() === String(value || "").toLowerCase()) || "Utility";
+function normalizeCategory(category) {
+  const value = String(category || "Utility").trim();
+  return DEFAULT_CATEGORIES.includes(value) ? value : "Utility";
 }
 
-function normalizeVisibility(value) {
-  const found = VISIBILITY_OPTIONS.find((entry) => entry === String(value || "").toLowerCase());
-  return found || "public";
+function canAccessClient(member, mod) {
+  if (!mod) return false;
+  if (mod.visibility === "hidden") return false;
+
+  const allowedRoles = Array.isArray(mod.accessRoleIds) ? mod.accessRoleIds : [];
+  if (!allowedRoles.length) return true;
+
+  return allowedRoles.some((roleId) => member.roles.cache.has(roleId));
 }
 
-function normalizeStatus(value) {
-  return STATUS_OPTIONS.find((entry) => entry.toLowerCase() === String(value || "").toLowerCase()) || "Stable";
+function getVisibleEntries(modules, member, category) {
+  const normalized = normalizeCategory(category);
+
+  return Object.entries(modules).filter(([_, mod]) => {
+    const modCategory = normalizeCategory(mod.category);
+    return modCategory === normalized && canAccessClient(member, mod);
+  });
 }
 
-function parseRoleId(raw) {
-  if (!raw) return null;
-  const match = String(raw).match(/\d{16,20}/);
-  return match ? match[0] : null;
+function buildPublicPanelEmbed() {
+  return new EmbedBuilder()
+    .setTitle("🚀 REDLINE CLIENT HUB")
+    .setDescription("Use the dropdown below to browse available client categories.")
+    .addFields(
+      {
+        name: "Access",
+        value: "Client availability depends on your roles.",
+        inline: false,
+      },
+      {
+        name: "Privacy",
+        value: "Selections and downloads are only visible to you.",
+        inline: false,
+      }
+    )
+    .setFooter({ text: "REDLINE • Secure client access" });
 }
 
-function formatRoleMention(roleId) {
+function buildPrivatePanelEmbed() {
+  return new EmbedBuilder()
+    .setTitle("🚀 REDLINE CLIENT HUB")
+    .setDescription("Choose a category below to browse clients.")
+    .addFields(
+      {
+        name: "Access",
+        value: "Only clients available to your roles will appear.",
+        inline: false,
+      },
+      {
+        name: "Privacy",
+        value: "Your selections and downloads remain private.",
+        inline: false,
+      }
+    )
+    .setFooter({ text: "REDLINE • Secure client access" });
+}
+
+function buildCategoryMenu(customId) {
+  return new StringSelectMenuBuilder()
+    .setCustomId(customId)
+    .setPlaceholder("Choose a client category...")
+    .addOptions(
+      DEFAULT_CATEGORIES.map((category) =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(category)
+          .setValue(category)
+          .setDescription(`Browse ${category} clients`)
+      )
+    );
+}
+
+function buildClientMenu(entries, customId, category) {
+  return new StringSelectMenuBuilder()
+    .setCustomId(customId)
+    .setPlaceholder(`Choose a ${category} client...`)
+    .addOptions(
+      entries.slice(0, 25).map(([key, mod]) =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(String(mod.label || key).slice(0, 100))
+          .setValue(key)
+          .setDescription(
+            String(
+              mod.description ||
+                `${mod.version || "Unknown"} • ${mod.mcVersion || "Unknown MC"}`
+            ).slice(0, 100)
+          )
+      )
+    );
+}
+
+function buildClientEmbed(mod, key) {
+  return new EmbedBuilder()
+    .setTitle(`🚀 ${mod.label || key || "Client Download"}`)
+    .setDescription(mod.description || "No description provided.")
+    .addFields(
+      { name: "Version", value: mod.version || "Unknown", inline: true },
+      { name: "Loader", value: mod.loader || "Unknown", inline: true },
+      { name: "MC Version", value: mod.mcVersion || "Unknown", inline: true },
+      { name: "Status", value: mod.status || "Stable", inline: true },
+      { name: "Category", value: normalizeCategory(mod.category), inline: true },
+      {
+        name: "Changelog",
+        value: mod.changelog || "No changelog provided.",
+        inline: false,
+      }
+    )
+    .setFooter({ text: "REDLINE • Secure client access" });
+}
+
+async function getSafeGuild(interaction) {
+  if (interaction.guild) return interaction.guild;
+  if (!interaction.guildId) throw new Error("This interaction is not in a guild.");
+  return await client.guilds.fetch(interaction.guildId);
+}
+
+async function getSafeMember(interaction) {
+  const guild = await getSafeGuild(interaction);
+  return await guild.members.fetch(interaction.user.id);
+}
+
+async function registerCommands() {
+  const commands = [
+    new SlashCommandBuilder()
+      .setName("clients")
+      .setDescription("Open the private client panel"),
+
+    new SlashCommandBuilder()
+      .setName("clientpanel")
+      .setDescription("Client panel tools")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addSubcommand((sub) =>
+        sub
+          .setName("send")
+          .setDescription("Send the public client panel")
+      ),
+
+    new SlashCommandBuilder()
+      .setName("upload")
+      .setDescription("Upload a client")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addStringOption((o) =>
+        o
+          .setName("name")
+          .setDescription("Client name")
+          .setRequired(true)
+      )
+      .addAttachmentOption((o) =>
+        o
+          .setName("file")
+          .setDescription("File to upload")
+          .setRequired(true)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("description")
+          .setDescription("Description")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("category")
+          .setDescription("Client category")
+          .setRequired(false)
+          .addChoices(
+            ...DEFAULT_CATEGORIES.map((cat) => ({ name: cat, value: cat }))
+          )
+      )
+      .addStringOption((o) =>
+        o
+          .setName("version")
+          .setDescription("Client version")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("loader")
+          .setDescription("Loader type")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("mcversion")
+          .setDescription("Minecraft version")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("status")
+          .setDescription("Release status")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("changelog")
+          .setDescription("Short changelog")
+          .setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("editclient")
+      .setDescription("Edit client metadata")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addStringOption((o) =>
+        o
+          .setName("client")
+          .setDescription("Existing client key or name")
+          .setRequired(true)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("name")
+          .setDescription("New display name")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("description")
+          .setDescription("New description")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("category")
+          .setDescription("New category")
+          .setRequired(false)
+          .addChoices(
+            ...DEFAULT_CATEGORIES.map((cat) => ({ name: cat, value: cat }))
+          )
+      )
+      .addStringOption((o) =>
+        o
+          .setName("visibility")
+          .setDescription("Client visibility")
+          .setRequired(false)
+          .addChoices(
+            { name: "Visible", value: "visible" },
+            { name: "Hidden", value: "hidden" }
+          )
+      )
+      .addStringOption((o) =>
+        o
+          .setName("version")
+          .setDescription("New version")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("loader")
+          .setDescription("New loader")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("mcversion")
+          .setDescription("New Minecraft version")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("status")
+          .setDescription("New status")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("changelog")
+          .setDescription("New changelog")
+          .setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("removeclient")
+      .setDescription("Remove a client")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addStringOption((o) =>
+        o
+          .setName("client")
+          .setDescription("Client key or name")
+          .setRequired(true)
+      ),
+  ].map((c) => c.toJSON());
+
+  const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
+
+  await rest.put(
+    Routes.applicationGuildCommands(
+      process.env.CLIENT_ID,
+      process.env.GUILD_ID
+    ),
+    { body: commands }
+  );
+}
+
+function findClientKey(modules, input) {
+  const needle = String(input || "").trim().toLowerCase();
+  if (!needle) return null;
+
+  if (modules[needle]) return needle;
+
+  for (const [key, mod] of Object.entries(modules)) {
+    if (String(key).toLowerCase() === needle) return key;
+    if (String(mod.label || "").trim().toLowerCase() === needle) return key;
+  }
+
+  return null;
+}
+
+client.once(Events.ClientReady, async () => {
+  try {
+    await ensureStorage();
+    await registerCommands();
+    console.log(`Logged in as ${client.user.tag}`);
+    console.log("Bot ready");
+  } catch (err) {
+    console.error("Startup error:", err);
+  }
+});
+
+client.on(Events.InteractionCreate, async (i) => {
+  try {
+    if (i.isChatInputCommand()) {
+      if (i.commandName === "clientpanel") {
+        const sub = i.options.getSubcommand();
+
+        if (sub === "send") {
+          if (!i.channel) {
+            return i.reply({
+              content: "This command can only be used in a server channel.",
+              ephemeral: true,
+            });
+          }
+
+          const row = new ActionRowBuilder().addComponents(
+            buildCategoryMenu("client_category_public")
+          );
+
+          await i.channel.send({
+            embeds: [buildPublicPanelEmbed()],
+            components: [row],
+          });
+
+          return i.reply({
+            content: "Public client panel sent.",
+            ephemeral: true,
+          });
+        }
+      }
+
+      if (i.commandName === "clients") {
+        const row = new ActionRowBuilder().addComponents(
+          buildCategoryMenu("client_category_private")
+        );
+
+        return i.reply({
+          embeds: [buildPrivatePanelEmbed()],
+          components: [row],
+          ephemeral: true,
+        });
+      }
+
+      if (i.commandName === "upload") {
+        const name = i.options.getString("name", true);
+        const file = i.options.getAttachment("file", true);
+        const description =
+          i.options.getString("description") || "No description";
+        const category = normalizeCategory(i.options.getString("category") || "Utility");
+        const version = i.options.getString("version") || "Unknown";
+        const loader = i.options.getString("loader") || "Unknown";
+        const mcVersion = i.options.getString("mcversion") || "Unknown";
+        const status = i.options.getString("status") || "Stable";
+        const changelog = i.options.getString("changelog") || "No changelog provided.";
+
+        await i.deferReply({ ephemeral: true });
+
+        const key = slugify(name);
+
+        if (!key) {
+          return i.editReply({
+            content: "Invalid client name.",
+          });
+        }
+
+        const originalName = file.name || "client.jar";
+        const ext = path.extname(originalName) || ".jar";
+        const savedFileName = key + ext;
+        const filePath = path.join(UPLOADS_DIR, savedFileName);
+
+        await downloadFile(file.url, filePath);
+
+        const mods = await loadModules();
+        mods[key] = {
+          label: name,
+          description,
+          category,
+          version,
+          loader,
+          mcVersion,
+          status,
+          changelog,
+          visibility: mods[key]?.visibility || "visible",
+          accessRoleIds: Array.isArray(mods[key]?.accessRoleIds)
+            ? mods[key].accessRoleIds
+            : [],
+          filePath,
+          originalName,
+        };
+        await saveModules(mods);
+
+        return i.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("✅ Client Uploaded")
+              .setDescription(`Uploaded **${name}** successfully.`)
+              .addFields(
+                { name: "Category", value: category, inline: true },
+                { name: "Version", value: version, inline: true },
+                { name: "MC Version", value: mcVersion, inline: true }
+              ),
+          ],
+        });
+      }
+
+      if (i.commandName === "editclient") {
+        const modules = await loadModules();
+        const input = i.options.getString("client", true);
+        const key = findClientKey(modules, input);
+
+        if (!key || !modules[key]) {
+          return i.reply({
+            content: "Client not found.",
+            ephemeral: true,
+          });
+        }
+
+        const mod = modules[key];
+
+        const newName = i.options.getString("name");
+        const newDescription = i.options.getString("description");
+        const newCategory = i.options.getString("category");
+        const newVisibility = i.options.getString("visibility");
+        const newVersion = i.options.getString("version");
+        const newLoader = i.options.getString("loader");
+        const newMcVersion = i.options.getString("mcversion");
+        const newStatus = i.options.getString("status");
+        const newChangelog = i.options.getString("changelog");
+
+        if (newName) mod.label = newName;
+        if (newDescription) mod.description = newDescription;
+        if (newCategory) mod.category = normalizeCategory(newCategory);
+        if (newVisibility) mod.visibility = newVisibility;
+        if (newVersion) mod.version = newVersion;
+        if (newLoader) mod.loader = newLoader;
+        if (newMcVersion) mod.mcVersion = newMcVersion;
+        if (newStatus) mod.status = newStatus;
+        if (newChangelog) mod.changelog = newChangelog;
+
+        modules[key] = mod;
+        await saveModules(modules);
+
+        return i.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("✏️ Client Updated")
+              .setDescription(`Updated **${mod.label || key}** successfully.`),
+          ],
+          ephemeral: true,
+        });
+      }
+
+      if (i.commandName === "removeclient") {
+        const modules = await loadModules();
+        const input = i.options.getString("client", true);
+        const key = findClientKey(modules, input);
+
+        if (!key || !modules[key]) {
+          return i.reply({
+            content: "Client not found.",
+            ephemeral: true,
+          });
+        }
+
+        const mod = modules[key];
+
+        if (mod.filePath && fs.existsSync(mod.filePath)) {
+          await fsp.unlink(mod.filePath).catch(() => {});
+        }
+
+        delete modules[key];
+        await saveModules(modules);
+
+        return i.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("🗑️ Client Removed")
+              .setDescription(`Removed **${mod.label || key}** successfully.`),
+          ],
+          ephemeral: true,
+        });
+      }
+    }
+
+    if (i.isStringSelectMenu()) {
+      if (
+        i.customId === "client_category_public" ||
+        i.customId === "client_category_private"
+      ) {
+        const category = i.values[0];
+        const mods = await loadModules();
+        const member = await getSafeMember(i);
+
+        const visibleEntries = getVisibleEntries(mods, member, category);
+
+        if (!visibleEntries.length) {
+          return i.reply({
+            embeds: [
+              new EmbedBuilder()
+                .setTitle("🚀 REDLINE CLIENT HUB")
+                .setDescription(`No clients are visible to you in **${category}**.`)
+                .setFooter({ text: "REDLINE • Secure client access" }),
+            ],
+            ephemeral: true,
+          });
+        }
+
+        const replyCustomId =
+          i.customId === "client_category_public"
+            ? "client_select_public"
+            : "client_select_private";
+
+        const menu = buildClientMenu(visibleEntries, replyCustomId, category);
+
+        return i.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle(`🚀 ${category} Clients`)
+              .setDescription("Pick a client below. Your result will stay private.")
+              .setFooter({ text: "REDLINE • Secure client access" }),
+          ],
+          components: [new ActionRowBuilder().addComponents(menu)],
+          ephemeral: true,
+        });
+      }
+
+      if (
+        i.customId === "client_select_public" ||
+        i.customId === "client_select_private"
+      ) {
+        const mods = await loadModules();
+        const key = i.values[0];
+        const mod = mods[key];
+
+        if (!mod) {
+          return i.reply({
+            content: "That client no longer exists.",
+            ephemeral: true,
+          });
+        }
+
+        const member = await getSafeMember(i);
+
+        if (!canAccessClient(member, mod)) {
+          return i.reply({
+            content: "You do not have access to that client.",
+            ephemeral: true,
+          });
+        }
+
+        if (!mod.filePath || !fs.existsSync(mod.filePath)) {
+          return i.reply({
+            content: "The file for that client is missing.",
+            ephemeral: true,
+          });
+        }
+
+        const file = new AttachmentBuilder(mod.filePath, {
+          name: mod.originalName || path.basename(mod.filePath),
+        });
+
+        return i.reply({
+          embeds: [buildClientEmbed(mod, key)],
+          files: [file],
+          ephemeral: true,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Interaction error:", err);
+
+    if (i.deferred) {
+      try {
+        await i.editReply({
+          content: "Something broke while handling that interaction.",
+        });
+      } catch {}
+    } else if (i.replied) {
+      try {
+        await i.followUp({
+          content: "Something broke while handling that interaction.",
+          ephemeral: true,
+        });
+      } catch {}
+    } else {
+      try {
+        await i.reply({
+          content: "Something broke while handling that interaction.",
+          ephemeral: true,
+        });
+      } catch {}
+    }
+  }
+});
+
+client.login(process.env.DISCORD_TOKEN);function formatRoleMention(roleId) {
   return roleId ? `<@&${roleId}>` : "Everyone eligible";
 }
 
