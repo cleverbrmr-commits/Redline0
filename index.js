@@ -738,26 +738,53 @@ client.on(Events.InteractionCreate, async (i) => {
       }
 
       if (i.commandName === "clientpanel") {
-        const subcommand = i.options.getSubcommand();
+  const subcommand = i.options.getSubcommand();
 
-        if (subcommand === "send") {
-          const targetChannel = i.channel || (i.channelId ? await client.channels.fetch(i.channelId).catch(() => null) : null);
-          const isServerTextChannel = !!i.guildId && !!targetChannel && targetChannel.isTextBased() && targetChannel.type !== ChannelType.DM && targetChannel.type !== ChannelType.GroupDM;
+  if (subcommand === "send") {
+    if (!i.guildId || !i.channelId) {
+      return i.reply({
+        embeds: [
+          makeEmbed({
+            title: "Send failed",
+            description: "This command must be used inside a server channel.",
+            color: Colors.Orange,
+          }),
+        ],
+        ephemeral: true,
+      });
+    }
 
-          if (!isServerTextChannel) {
-            return i.reply({
-              embeds: [makeEmbed({ title: "Send failed", description: "Use this in a server text channel.", color: Colors.Orange })],
-              ephemeral: true,
-            });
-          }
+    const targetChannel =
+      i.channel ||
+      (await client.channels.fetch(i.channelId).catch(() => null));
 
-          await targetChannel.send(buildPublicPanelMessage());
+    if (!targetChannel || typeof targetChannel.send !== "function") {
+      return i.reply({
+        embeds: [
+          makeEmbed({
+            title: "Send failed",
+            description: "I couldn't access this channel properly.",
+            color: Colors.Orange,
+          }),
+        ],
+        ephemeral: true,
+      });
+    }
 
-          return i.reply({
-            embeds: [makeEmbed({ title: `${brandEmoji()} Panel sent`, description: "Public client panel posted in this channel.", color: Colors.Green })],
-            ephemeral: true,
-          });
-        }
+    await targetChannel.send(buildPublicPanelMessage());
+
+    return i.reply({
+      embeds: [
+        makeEmbed({
+          title: `${brandEmoji()} Panel sent`,
+          description: "Public client panel posted in this channel.",
+          color: Colors.Green,
+        }),
+      ],
+      ephemeral: true,
+    });
+  }
+      }
       }
 
       if (i.commandName === "upload") {
