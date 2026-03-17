@@ -121,6 +121,18 @@ function resolveModulePath(mod) {
   return null;
 }
 
+
+function getStoredFileNameForKey(key, originalName, fallbackExt = ".jar") {
+  const ext = path.extname(originalName || "") || fallbackExt;
+  return `${key}${ext}`;
+}
+
+function buildClientAttachment(mod, filePath) {
+  return new AttachmentBuilder(filePath, {
+    name: mod.originalName || path.basename(filePath),
+  });
+}
+
 function makeEmbed({ title, description, color, fields, footer }) {
   const embed = new EmbedBuilder()
     .setColor(color || brandColor())
@@ -365,10 +377,15 @@ function buildClientFields(mod) {
   ];
 }
 
+function getVisibleClientEntries(modules, member, category = null) {
+  return Object.entries(modules).filter(([, mod]) => {
+    if (category && mod.category !== category) return false;
+    return isVisibleToMember(member, mod);
+  });
+}
+
 function getVisibleCategories(modules, member) {
-  return CATEGORY_OPTIONS.filter((category) =>
-    Object.values(modules).some((mod) => mod.category === category && isVisibleToMember(member, mod))
-  );
+  return CATEGORY_OPTIONS.filter((category) => getVisibleClientEntries(modules, member, category).length > 0);
 }
 
 function buildCategoryActionRow(categories, customId) {
@@ -390,9 +407,7 @@ function buildCategoryActionRow(categories, customId) {
 }
 
 function buildClientActionRow(modules, member, category, customIdPrefix) {
-  const visibleClients = Object.entries(modules)
-    .filter(([, mod]) => mod.category === category && isVisibleToMember(member, mod))
-    .slice(0, MAX_MENU_OPTIONS);
+  const visibleClients = getVisibleClientEntries(modules, member, category).slice(0, MAX_MENU_OPTIONS);
 
   if (!visibleClients.length) return null;
 
@@ -411,10 +426,33 @@ function buildClientActionRow(modules, member, category, customIdPrefix) {
   return new ActionRowBuilder().addComponents(menu);
 }
 
+function buildCategoryBrowserEmbed(visibleCategories, mode = "private") {
+  const isPrivate = mode === "private";
+  return makeEmbed({
+    title: `${brandEmoji()} ${BRAND.name}`,
+    description: isPrivate
+      ? "Pick a category to browse clients. Your selections and downloads are only visible to you."
+      : "Pick a category below. Everyone can see this panel, but each person gets private responses.",
+    fields: [
+      { name: "Visible Categories", value: String(visibleCategories.length), inline: true },
+      { name: "Download Cooldown", value: `${DOWNLOAD_COOLDOWN_MS / 1000}s`, inline: true },
+      { name: "Privacy", value: "Client selections + files are sent ephemerally.", inline: false },
+    ],
+  });
+}
+
+async function resolveSendableInteractionChannel(interaction) {
+  if (!interaction.guildId || !interaction.channelId) return null;
+  const targetChannel = interaction.channel || (await client.channels.fetch(interaction.channelId).catch(() => null));
+  if (!targetChannel || typeof targetChannel.send !== "function") return null;
+  return targetChannel;
+}
+
 async function sendPrivateClientPanel(interaction) {
   const { actorMember } = await resolveInteractionContext(interaction);
   const modules = await loadModules();
-  const visibleCategories = getVisibleCategories(modules, actorMember || interaction.member);
+  const member = actorMember || interaction.member;
+  const visibleCategories = getVisibleCategories(modules, member);
   const row = buildCategoryActionRow(visibleCategories, "client_category_select_private");
 
   if (!row) {
@@ -434,35 +472,16 @@ async function sendPrivateClientPanel(interaction) {
   }
 
   return interaction.reply({
-    embeds: [
-      makeEmbed({
-        title: `${brandEmoji()} ${BRAND.name}`,
-        description: "Choose a category first, then pick a client. Downloads stay private and logged.",
-        fields: [
-          { name: "Categories", value: String(visibleCategories.length), inline: true },
-          { name: "Cooldown", value: `${DOWNLOAD_COOLDOWN_MS / 1000}s per download`, inline: true },
-        ],
-      }),
-    ],
+    embeds: [buildCategoryBrowserEmbed(visibleCategories, "private")],
     components: [row],
     ephemeral: true,
   });
 }
 
-function buildPublicPanelMessage() {
-  const row = buildCategoryActionRow(CATEGORY_OPTIONS, "client_category_select_public");
+function buildPublicPanelMessage(visibleCategories) {
+  const row = buildCategoryActionRow(visibleCategories, "client_category_select_public");
   return {
-    embeds: [
-      makeEmbed({
-        title: `${brandEmoji()} ${BRAND.name}`,
-        description:
-          "Use the dropdown below to browse client categories. Selections and downloads are sent privately to each user.",
-        fields: [
-          { name: "Access", value: "Role locks still apply per user.", inline: true },
-          { name: "Privacy", value: "Downloads stay ephemeral.", inline: true },
-        ],
-      }),
-    ],
+    embeds: [buildCategoryBrowserEmbed(visibleCategories, "public")],
     components: row ? [row] : [],
   };
 }
@@ -491,7 +510,8 @@ async function handleCategorySelection(interaction, mode) {
     embeds: [
       makeEmbed({
         title: `${brandEmoji()} ${category}`,
-        description: "Choose a client below. Your result will stay private.",
+        description: "Choose a client below to view metadata and privately download the file.",
+        fields: [{ name: "Tip", value: "Status/loader/version are shown directly in the menu options." }],
         color: brandColor(),
       }),
     ],
@@ -544,9 +564,7 @@ async function handleClientSelection(interaction) {
   }
 
   setCooldown(interaction.user.id);
-  const file = new AttachmentBuilder(filePath, {
-    name: mod.originalName || path.basename(filePath),
-  });
+  const file = buildClientAttachment(mod, filePath);
 
   await logDownload(interaction, mod);
 
@@ -738,53 +756,55 @@ client.on(Events.InteractionCreate, async (i) => {
       }
 
       if (i.commandName === "clientpanel") {
-  const subcommand = i.options.getSubcommand();
+        const subcommand = i.options.getSubcommand();
 
-  if (subcommand === "send") {
-    if (!i.guildId || !i.channelId) {
-      return i.reply({
-        embeds: [
-          makeEmbed({
-            title: "Send failed",
-            description: "This command must be used inside a server channel.",
-            color: Colors.Orange,
-          }),
-        ],
-        ephemeral: true,
-      });
-    }
+        if (subcommand === "send") {
+          const targetChannel = await resolveSendableInteractionChannel(i);
 
-    const targetChannel =
-      i.channel ||
-      (await client.channels.fetch(i.channelId).catch(() => null));
+          if (!targetChannel) {
+            return i.reply({
+              embeds: [
+                makeEmbed({
+                  title: "Send failed",
+                  description: "Use this inside a server channel where I can send messages.",
+                  color: Colors.Orange,
+                }),
+              ],
+              ephemeral: true,
+            });
+          }
 
-    if (!targetChannel || typeof targetChannel.send !== "function") {
-      return i.reply({
-        embeds: [
-          makeEmbed({
-            title: "Send failed",
-            description: "I couldn't access this channel properly.",
-            color: Colors.Orange,
-          }),
-        ],
-        ephemeral: true,
-      });
-    }
+          const modules = await loadModules();
+          const { actorMember } = await resolveInteractionContext(i);
+          const member = actorMember || i.member;
+          const visibleCategories = getVisibleCategories(modules, member);
 
-    await targetChannel.send(buildPublicPanelMessage());
+          if (!visibleCategories.length) {
+            return i.reply({
+              embeds: [
+                makeEmbed({
+                  title: "Panel not sent",
+                  description: "No categories are currently visible from your access scope.",
+                  color: Colors.Orange,
+                }),
+              ],
+              ephemeral: true,
+            });
+          }
 
-    return i.reply({
-      embeds: [
-        makeEmbed({
-          title: `${brandEmoji()} Panel sent`,
-          description: "Public client panel posted in this channel.",
-          color: Colors.Green,
-        }),
-      ],
-      ephemeral: true,
-    });
-  }
-      }
+          await targetChannel.send(buildPublicPanelMessage(visibleCategories));
+
+          return i.reply({
+            embeds: [
+              makeEmbed({
+                title: `${brandEmoji()} Panel sent`,
+                description: `Public client panel posted in <#${targetChannel.id}>.`,
+                color: Colors.Green,
+              }),
+            ],
+            ephemeral: true,
+          });
+        }
       }
 
       if (i.commandName === "upload") {
@@ -810,8 +830,7 @@ client.on(Events.InteractionCreate, async (i) => {
         }
 
         const originalName = file.name || "client.jar";
-        const ext = path.extname(originalName) || ".jar";
-        const savedFileName = `${key}${ext}`;
+        const savedFileName = getStoredFileNameForKey(key, originalName);
         const filePath = path.join(UPLOADS_DIR, savedFileName);
 
         await downloadFile(file.url, filePath);
@@ -928,8 +947,8 @@ client.on(Events.InteractionCreate, async (i) => {
         }
 
         const originalPath = resolveModulePath(modules[oldKey]);
-        const ext = path.extname(mod.originalName || "") || path.extname(mod.storedFileName || "") || ".jar";
-        mod.storedFileName = `${newKey}${ext}`;
+        const currentExt = path.extname(mod.originalName || "") || path.extname(mod.storedFileName || "") || ".jar";
+        mod.storedFileName = getStoredFileNameForKey(newKey, mod.originalName, currentExt);
         const nextPath = path.join(UPLOADS_DIR, mod.storedFileName);
 
         if (originalPath && originalPath !== nextPath && fs.existsSync(originalPath)) {
