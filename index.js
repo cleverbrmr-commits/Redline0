@@ -741,14 +741,17 @@ client.on(Events.InteractionCreate, async (i) => {
         const subcommand = i.options.getSubcommand();
 
         if (subcommand === "send") {
-          if (!i.channel || !i.channel.isTextBased()) {
+          const targetChannel = i.channel || (i.channelId ? await client.channels.fetch(i.channelId).catch(() => null) : null);
+          const isServerTextChannel = !!i.guildId && !!targetChannel && targetChannel.isTextBased() && targetChannel.type !== ChannelType.DM && targetChannel.type !== ChannelType.GroupDM;
+
+          if (!isServerTextChannel) {
             return i.reply({
-              embeds: [makeEmbed({ title: "Send failed", description: "Use this in a normal server channel.", color: Colors.Orange })],
+              embeds: [makeEmbed({ title: "Send failed", description: "Use this in a server text channel.", color: Colors.Orange })],
               ephemeral: true,
             });
           }
 
-          await i.channel.send(buildPublicPanelMessage());
+          await targetChannel.send(buildPublicPanelMessage());
 
           return i.reply({
             embeds: [makeEmbed({ title: `${brandEmoji()} Panel sent`, description: "Public client panel posted in this channel.", color: Colors.Green })],
