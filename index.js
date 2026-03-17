@@ -143,9 +143,17 @@ function canActOn(actorMember, targetMember) {
   return actorMember.roles.highest.position > targetMember.roles.highest.position;
 }
 
+function extractRoleIds(member) {
+  if (!member) return new Set();
+  if (member.roles?.cache) return new Set(member.roles.cache.keys());
+  if (Array.isArray(member.roles)) return new Set(member.roles);
+  if (Array.isArray(member.roleIds)) return new Set(member.roleIds);
+  return new Set();
+}
+
 function memberHasRoleAccess(member, mod) {
   if (!mod.accessRoleId) return true;
-  return member?.roles?.cache?.has(mod.accessRoleId) || false;
+  return extractRoleIds(member).has(mod.accessRoleId);
 }
 
 function isVisibleToMember(member, mod) {
@@ -153,6 +161,14 @@ function isVisibleToMember(member, mod) {
     return false;
   }
   return memberHasRoleAccess(member, mod);
+}
+
+
+async function resolveInteractionContext(i) {
+  const guild = i.guild || (i.guildId ? await client.guilds.fetch(i.guildId).catch(() => null) : null);
+  const actorMember = guild ? await guild.members.fetch(i.user.id).catch(() => null) : null;
+  const botMember = guild ? await guild.members.fetchMe().catch(() => null) : null;
+  return { guild, actorMember, botMember };
 }
 
 function normalizeModuleRecord(key, value) {
@@ -552,8 +568,9 @@ client.on(Events.InteractionCreate, async (i) => {
   try {
     if (i.isChatInputCommand()) {
       if (i.commandName === "clients") {
+        const { actorMember } = await resolveInteractionContext(i);
         const modules = await loadModules();
-        const row = buildCategoryMenu(modules, i.member);
+        const row = buildCategoryMenu(modules, actorMember || i.member);
 
         if (!row) {
           return i.reply({
@@ -577,7 +594,7 @@ client.on(Events.InteractionCreate, async (i) => {
               title: `${brandEmoji()} ${BRAND.name}`,
               description: "Choose a category first, then pick a client. Downloads stay private and logged.",
               fields: [
-                { name: "Categories", value: String(CATEGORY_OPTIONS.filter((c) => Object.values(modules).some((m) => m.category === c && isVisibleToMember(i.member, m))).length), inline: true },
+                { name: "Categories", value: String(CATEGORY_OPTIONS.filter((c) => Object.values(modules).some((m) => m.category === c && isVisibleToMember(actorMember || i.member, m))).length), inline: true },
                 { name: "Cooldown", value: `${DOWNLOAD_COOLDOWN_MS / 1000}s per download`, inline: true },
               ],
             }),
@@ -814,15 +831,20 @@ client.on(Events.InteractionCreate, async (i) => {
       }
 
       if (i.commandName === "kick") {
+        const { guild, actorMember } = await resolveInteractionContext(i);
+        if (!guild || !actorMember) {
+          return i.reply({ embeds: [makeEmbed({ title: "Kick failed", description: "Guild context was unavailable. Try again in a second.", color: Colors.Orange })], ephemeral: true });
+        }
+
         const user = i.options.getUser("user", true);
         const reason = i.options.getString("reason") || "No reason provided";
-        const member = await i.guild.members.fetch(user.id).catch(() => null);
+        const member = await guild.members.fetch(user.id).catch(() => null);
 
         if (!member) {
           return i.reply({ embeds: [makeEmbed({ title: "Kick failed", description: "That user is not in this server.", color: Colors.Orange })], ephemeral: true });
         }
 
-        if (!canActOn(i.member, member) || !member.kickable) {
+        if (!canActOn(actorMember, member) || !member.kickable) {
           return i.reply({ embeds: [makeEmbed({ title: "Kick denied", description: "You or the bot are below that member in the role stack.", color: Colors.Orange })], ephemeral: true });
         }
 
@@ -831,39 +853,49 @@ client.on(Events.InteractionCreate, async (i) => {
       }
 
       if (i.commandName === "ban") {
+        const { guild, actorMember } = await resolveInteractionContext(i);
+        if (!guild || !actorMember) {
+          return i.reply({ embeds: [makeEmbed({ title: "Ban failed", description: "Guild context was unavailable. Try again in a second.", color: Colors.Orange })], ephemeral: true });
+        }
+
         const user = i.options.getUser("user", true);
         const reason = i.options.getString("reason") || "No reason provided";
         const deleteDays = i.options.getInteger("delete_days") || 0;
-        const member = await i.guild.members.fetch(user.id).catch(() => null);
+        const member = await guild.members.fetch(user.id).catch(() => null);
 
-        if (member && (!canActOn(i.member, member) || !member.bannable)) {
+        if (member && (!canActOn(actorMember, member) || !member.bannable)) {
           return i.reply({ embeds: [makeEmbed({ title: "Ban denied", description: "You or the bot are below that member in the role stack.", color: Colors.Orange })], ephemeral: true });
         }
 
-        await i.guild.members.ban(user.id, { reason, deleteMessageSeconds: deleteDays * 86400 });
+        await guild.members.ban(user.id, { reason, deleteMessageSeconds: deleteDays * 86400 });
         return i.reply({ embeds: [makeEmbed({ title: `${brandEmoji()} Member banned`, description: `**${user.tag}** was banned.`, fields: [{ name: "Reason", value: trimText(reason, 1024) }], color: Colors.DarkRed })] });
       }
 
       if (i.commandName === "prison") {
+        const { guild, actorMember, botMember } = await resolveInteractionContext(i);
+        if (!guild || !actorMember || !botMember) {
+          return i.reply({ embeds: [makeEmbed({ title: "Prison failed", description: "Guild context was unavailable. Try again in a second.", color: Colors.Orange })], ephemeral: true });
+        }
+
         const user = i.options.getUser("user", true);
         const reason = i.options.getString("reason") || "No reason provided";
-        const member = await i.guild.members.fetch(user.id).catch(() => null);
+        const member = await guild.members.fetch(user.id).catch(() => null);
 
         if (!member) {
           return i.reply({ embeds: [makeEmbed({ title: "Prison failed", description: "That user is not in this server.", color: Colors.Orange })], ephemeral: true });
         }
 
-        if (!canActOn(i.member, member)) {
+        if (!canActOn(actorMember, member)) {
           return i.reply({ embeds: [makeEmbed({ title: "Prison denied", description: "You cannot prison someone above or equal to you in the role stack.", color: Colors.Orange })], ephemeral: true });
         }
 
-        const prisonRole = await ensurePrisonRole(i.guild);
-        if (prisonRole.position >= i.guild.members.me.roles.highest.position) {
+        const prisonRole = await ensurePrisonRole(guild);
+        if (prisonRole.position >= botMember.roles.highest.position) {
           return i.reply({ embeds: [makeEmbed({ title: "Prison setup blocked", description: "Move the bot role above the Prisoner role, then try again.", color: Colors.Orange })], ephemeral: true });
         }
 
         const removableRoleIds = member.roles.cache
-          .filter((role) => role.id !== i.guild.id && role.id !== prisonRole.id && role.position < i.guild.members.me.roles.highest.position)
+          .filter((role) => role.id !== guild.id && role.id !== prisonRole.id && role.position < botMember.roles.highest.position)
           .map((role) => role.id);
 
         if (removableRoleIds.length) {
@@ -895,10 +927,15 @@ client.on(Events.InteractionCreate, async (i) => {
       }
 
       if (i.commandName === "unprison") {
+        const { guild, botMember } = await resolveInteractionContext(i);
+        if (!guild || !botMember) {
+          return i.reply({ embeds: [makeEmbed({ title: "Release failed", description: "Guild context was unavailable. Try again in a second.", color: Colors.Orange })], ephemeral: true });
+        }
+
         const user = i.options.getUser("user", true);
         const note = i.options.getString("note") || "No release note provided";
-        const member = await i.guild.members.fetch(user.id).catch(() => null);
-        const prisonRole = i.guild.roles.cache.find((r) => r.name === PRISON_ROLE_NAME);
+        const member = await guild.members.fetch(user.id).catch(() => null);
+        const prisonRole = guild.roles.cache.find((r) => r.name === PRISON_ROLE_NAME);
 
         if (!member || !prisonRole) {
           return i.reply({ embeds: [makeEmbed({ title: "Release failed", description: "That member or the Prisoner role could not be found.", color: Colors.Orange })], ephemeral: true });
@@ -909,8 +946,8 @@ client.on(Events.InteractionCreate, async (i) => {
         const prisonState = await loadPrisonState();
         const record = prisonState[member.id];
         const restoreRoleIds = (record?.removedRoleIds || []).filter((roleId) => {
-          const role = i.guild.roles.cache.get(roleId);
-          return role && role.position < i.guild.members.me.roles.highest.position;
+          const role = guild.roles.cache.get(roleId);
+          return role && role.position < botMember.roles.highest.position;
         });
 
         if (restoreRoleIds.length) {
@@ -993,7 +1030,8 @@ client.on(Events.InteractionCreate, async (i) => {
       if (i.customId === "client_category_select") {
         const modules = await loadModules();
         const category = i.values[0];
-        const row = buildClientMenu(modules, i.member, category);
+        const { actorMember } = await resolveInteractionContext(i);
+        const row = buildClientMenu(modules, actorMember || i.member, category);
 
         if (!row) {
           return i.reply({
@@ -1025,7 +1063,8 @@ client.on(Events.InteractionCreate, async (i) => {
           return i.reply({ embeds: [makeEmbed({ title: "Download failed", description: "That client no longer exists.", color: Colors.Orange })], ephemeral: true });
         }
 
-        if (!isVisibleToMember(i.member, mod)) {
+        const { actorMember } = await resolveInteractionContext(i);
+        if (!isVisibleToMember(actorMember || i.member, mod)) {
           return i.reply({ embeds: [makeEmbed({ title: "Access denied", description: "You do not have access to that client.", color: Colors.Orange })], ephemeral: true });
         }
 
