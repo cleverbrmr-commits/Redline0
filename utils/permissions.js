@@ -1,6 +1,4 @@
-const {
-  normalizeVisibility,
-} = require("./helpers");
+const { normalizeVisibility } = require('./helpers');
 
 function canActOn(actorMember, targetMember) {
   if (!actorMember || !targetMember) return false;
@@ -26,16 +24,28 @@ function isVisibleToMember(member, mod) {
   const visibility = normalizeVisibility(mod.visibility);
   const hasRoleAccess = memberHasRoleAccess(member, mod);
 
-  if (visibility === "hidden") {
+  if (visibility === 'hidden') {
     return hasRoleAccess && !!mod.accessRoleId;
   }
 
   return hasRoleAccess;
 }
 
+function hasGuildPermission(member, permission) {
+  return Boolean(member?.permissions?.has?.(permission));
+}
+
+function ensureMemberPermission(member, permission, errorMessage = 'You do not have permission to use this command.') {
+  if (!hasGuildPermission(member, permission)) {
+    throw new Error(errorMessage);
+  }
+}
+
 module.exports = {
   canActOn,
+  ensureMemberPermission,
   extractRoleIds,
+  hasGuildPermission,
   isVisibleToMember,
   memberHasRoleAccess,
 };

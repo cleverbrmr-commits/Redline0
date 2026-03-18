@@ -8,6 +8,15 @@ module.exports = {
   commands: [
     {
       name: "clientpanel",
+      metadata: {
+        category: "client/content management",
+        description: "Send the public client panel into the current channel.",
+        usage: ["/clientpanel send"],
+        prefixEnabled: false,
+        examples: ["/clientpanel send"],
+        permissions: ["Manage Guild"],
+        response: "ephemeral",
+      },
       data: new SlashCommandBuilder()
         .setName("clientpanel")
         .setDescription("Client panel tools")
