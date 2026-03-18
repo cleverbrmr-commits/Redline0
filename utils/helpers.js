@@ -22,7 +22,7 @@ const BRAND = {
   colors: [
     Colors.Red,
     Colors.DarkRed,
-    Colors.OrangeRed,
+    Colors.Orange,
     Colors.Gold,
     Colors.Blurple,
     Colors.DarkButNotBlack,
@@ -42,6 +42,17 @@ function brandEmoji() {
 }
 
 function prettyError(err) {
+  if (Array.isArray(err?.errors) && err.errors.length) {
+    const messages = err.errors
+      .map((entry) => entry?.message || entry)
+      .filter(Boolean)
+      .map((entry) => String(entry).trim());
+
+    if (messages.length) {
+      return trimText(messages.join(" • "), 500);
+    }
+  }
+
   return err?.message || "Something went wrong.";
 }
 
@@ -91,20 +102,51 @@ function formatRoleMention(roleId) {
   return roleId ? `<@&${roleId}>` : "Everyone eligible";
 }
 
+function sanitizeFileName(name, fallback = "file") {
+  const basename = path.basename(String(name || fallback));
+  const sanitized = basename
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/\.{2,}/g, ".")
+    .replace(/^\.+/, "");
+
+  return sanitized || fallback;
+}
+
+function safeResolvePath(rootDir, targetPath) {
+  if (!rootDir || !targetPath) return null;
+
+  const resolvedRoot = path.resolve(rootDir);
+  const resolvedTarget = path.resolve(resolvedRoot, String(targetPath));
+
+  if (resolvedTarget === resolvedRoot) return null;
+  if (!resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)) return null;
+
+  return resolvedTarget;
+}
+
 function resolveModulePath(mod, uploadsDir) {
-  if (mod?.storedFileName) return path.join(uploadsDir, mod.storedFileName);
-  if (mod?.filePath) return mod.filePath;
+  if (mod?.storedFileName) {
+    return safeResolvePath(uploadsDir, mod.storedFileName);
+  }
+
+  if (mod?.filePath) {
+    return safeResolvePath(uploadsDir, sanitizeFileName(mod.filePath));
+  }
+
   return null;
 }
 
 function getStoredFileNameForKey(key, originalName, fallbackExt = ".jar") {
-  const ext = path.extname(originalName || "") || fallbackExt;
-  return `${key}${ext}`;
+  const safeKey = slugify(key) || "client";
+  const safeOriginalName = sanitizeFileName(originalName || `client${fallbackExt}`);
+  const ext = path.extname(safeOriginalName).replace(/[^a-zA-Z0-9.]/g, "") || fallbackExt;
+  return `${safeKey}${ext.toLowerCase()}`;
 }
 
 function buildClientAttachment(mod, filePath) {
   return new AttachmentBuilder(filePath, {
-    name: mod.originalName || path.basename(filePath),
+    name: sanitizeFileName(mod.originalName || path.basename(filePath), path.basename(filePath)),
   });
 }
 
@@ -147,6 +189,8 @@ module.exports = {
   resolveInteractionContext,
   resolveModulePath,
   resolveSendableChannel,
+  safeResolvePath,
+  sanitizeFileName,
   slugify,
   trimText,
   validateEnv,

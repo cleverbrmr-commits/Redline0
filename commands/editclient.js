@@ -13,6 +13,7 @@ const {
   normalizeStatus,
   normalizeVisibility,
   resolveModulePath,
+  safeResolvePath,
   slugify,
 } = require("../utils/helpers");
 
@@ -86,10 +87,24 @@ module.exports = {
           newKey = candidate;
         }
 
+        if (normalizeVisibility(mod.visibility) === "hidden" && !mod.accessRoleId) {
+          return interaction.reply({
+            embeds: [makeWarningEmbed({ title: "Edit blocked", description: "Hidden clients require an access role, otherwise nobody can see them in `/clients`." })],
+            ephemeral: true,
+          });
+        }
+
         const originalPath = resolveModulePath(modules[oldKey], UPLOADS_DIR);
         const currentExt = path.extname(mod.originalName || "") || path.extname(mod.storedFileName || "") || ".jar";
         mod.storedFileName = getStoredFileNameForKey(newKey, mod.originalName, currentExt);
-        const nextPath = path.join(UPLOADS_DIR, mod.storedFileName);
+        const nextPath = safeResolvePath(UPLOADS_DIR, mod.storedFileName);
+
+        if (!nextPath) {
+          return interaction.reply({
+            embeds: [makeWarningEmbed({ title: "Edit blocked", description: "The updated file path could not be resolved safely." })],
+            ephemeral: true,
+          });
+        }
 
         if (originalPath && originalPath !== nextPath && fs.existsSync(originalPath)) {
           await require("fs/promises").rename(originalPath, nextPath);
