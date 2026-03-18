@@ -5,6 +5,7 @@ const DEFAULT_CONFIG = {
   modLogChannelId: null,
   prisonLogChannelId: null,
   announceLogChannelId: null,
+  welcomers: {},
 };
 
 function getConfiguredLogChannelId(config, key) {

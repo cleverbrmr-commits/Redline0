@@ -39,7 +39,7 @@ module.exports = {
         return interaction.reply({ embeds });
       },
 
-      async prefixExecute({ message, args, commandRegistry }) {
+      async executePrefix({ message, args, commandRegistry }) {
         const query = args.join(" ").trim();
 
         if (query) {

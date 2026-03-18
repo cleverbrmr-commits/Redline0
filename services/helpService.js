@@ -1,4 +1,4 @@
-const { makeEmbed, makeInfoEmbed, makeWarningEmbed } = require("../utils/embeds");
+const { makeEmbed, makeInfoEmbed, makeWarningEmbed } = require('../utils/embeds');
 
 const FIELD_LIMIT = 1024;
 const SAFE_FIELD_LIMIT = 900;
@@ -6,14 +6,14 @@ const EMBED_DESCRIPTION_LIMIT = 4096;
 const MAX_FIELDS_PER_EMBED = 6;
 
 function trim(text, max) {
-  const value = String(text ?? "");
+  const value = String(text ?? '');
   if (value.length <= max) return value;
   return `${value.slice(0, Math.max(0, max - 3))}...`;
 }
 
 function toTitleCase(value) {
-  return String(value || "other")
-    .replace(/[-_]/g, " ")
+  return String(value || 'other')
+    .replace(/[-_]/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
@@ -46,7 +46,7 @@ function getAllCommands(commandRegistry) {
     return uniqueByName(commandRegistry.commands);
   }
 
-  if (typeof commandRegistry === "object") {
+  if (typeof commandRegistry === 'object') {
     return uniqueByName(Object.values(commandRegistry));
   }
 
@@ -54,69 +54,86 @@ function getAllCommands(commandRegistry) {
 }
 
 function getCommandName(command) {
-  return command?.name || command?.data?.name || "unknown";
+  return command?.name || command?.data?.name || 'unknown';
+}
+
+function getMeta(command) {
+  return command?.metadata || command?.meta || {};
 }
 
 function getCommandCategory(command) {
-  return command?.category || command?.meta?.category || "other";
+  return command?.category || getMeta(command).category || 'other';
 }
 
 function getCommandDescription(command) {
-  return (
-    command?.description ||
-    command?.meta?.description ||
-    command?.data?.description ||
-    "No description provided."
-  );
+  return command?.description || getMeta(command).description || command?.data?.description || 'No description provided.';
 }
 
 function getCommandUsage(command) {
-  return (
-    command?.usage ||
-    command?.meta?.usage ||
-    `/${getCommandName(command)}`
-  );
+  const usage = command?.usage || getMeta(command).usage;
+  if (Array.isArray(usage)) {
+    return usage.join('\n');
+  }
+  return usage || `/${getCommandName(command)}`;
 }
 
 function getCommandExamples(command) {
-  const examples = command?.examples || command?.meta?.examples || [];
+  const examples = command?.examples || getMeta(command).examples || [];
   return Array.isArray(examples) ? examples : [examples];
 }
 
-function getCommandPermissions(command) {
-  const permissions =
-    command?.permissions ||
-    command?.meta?.permissions ||
-    command?.defaultMemberPermissions ||
-    null;
+function getCommandPrefixUsage(command, prefixName) {
+  const meta = getMeta(command);
+  const prefixUsage = meta.prefixUsage || command?.prefixUsage;
+  if (Array.isArray(prefixUsage) && prefixUsage.length) {
+    return prefixUsage.join('\n');
+  }
+  if (typeof prefixUsage === 'string' && prefixUsage.trim()) {
+    return prefixUsage;
+  }
+  return supportsPrefix(command) ? `${prefixName} ${getCommandName(command)}` : 'Not supported';
+}
 
-  if (!permissions) return "Everyone";
-  if (Array.isArray(permissions)) return permissions.join(", ");
+
+function formatCommandList(value) {
+  return String(value || '')
+    .split('\n')
+    .filter(Boolean)
+    .map((entry) => `• \`${trim(entry, 120)}\``)
+    .join('\n') || 'None';
+}
+
+function getCommandPermissions(command) {
+  const permissions = command?.permissions || getMeta(command).permissions || command?.defaultMemberPermissions || null;
+  if (!permissions) return 'Everyone';
+  if (Array.isArray(permissions)) return permissions.join(', ');
   return String(permissions);
 }
 
 function supportsPrefix(command) {
+  const meta = getMeta(command);
+  if (meta.prefixEnabled === false) return false;
   if (command?.prefix === false) return false;
   if (command?.meta?.prefix === false) return false;
-  return true;
+  return typeof command?.executePrefix === 'function' || meta.prefixEnabled === true;
 }
 
 function findCommand(commandRegistry, query) {
   const commands = getAllCommands(commandRegistry);
-  const normalized = String(query || "").trim().toLowerCase();
+  const normalized = String(query || '').trim().toLowerCase();
 
   return commands.find((command) => {
     const name = getCommandName(command).toLowerCase();
     if (name === normalized) return true;
 
-    const aliases = command?.aliases || command?.meta?.aliases || [];
+    const aliases = command?.aliases || getMeta(command).aliases || [];
     return aliases.map((alias) => String(alias).toLowerCase()).includes(normalized);
   });
 }
 
 function chunkLines(lines, maxLen = SAFE_FIELD_LIMIT) {
   const chunks = [];
-  let current = "";
+  let current = '';
 
   for (const line of lines) {
     const candidate = current ? `${current}\n${line}` : line;
@@ -128,7 +145,7 @@ function chunkLines(lines, maxLen = SAFE_FIELD_LIMIT) {
 
     if (current) {
       chunks.push(current);
-      current = "";
+      current = '';
     }
 
     if (line.length <= maxLen) {
@@ -164,21 +181,19 @@ function groupCommandsByCategory(commands) {
 
 function formatOverviewLine(command) {
   const slash = `/${getCommandName(command)}`;
-  const usage = trim(getCommandUsage(command), 80);
+  const usage = trim(getCommandUsage(command).split('\n')[0], 80);
   const description = trim(getCommandDescription(command), 120);
   return `**${slash}** — ${description}\nUsage: \`${usage}\``;
 }
 
-function buildHelpOverviewEmbeds(commandRegistry, prefixName = "Serenity") {
-  const commands = getAllCommands(commandRegistry).sort((a, b) =>
-    getCommandName(a).localeCompare(getCommandName(b))
-  );
+function buildHelpOverviewEmbeds(commandRegistry, prefixName = 'Serenity') {
+  const commands = getAllCommands(commandRegistry).sort((a, b) => getCommandName(a).localeCompare(getCommandName(b)));
 
   if (!commands.length) {
     return [
       makeWarningEmbed({
-        title: "Help unavailable",
-        description: "No commands are currently loaded.",
+        title: 'Help unavailable',
+        description: 'No commands are currently loaded.',
       }),
     ];
   }
@@ -192,10 +207,7 @@ function buildHelpOverviewEmbeds(commandRegistry, prefixName = "Serenity") {
 
     chunks.forEach((chunk, index) => {
       fieldQueue.push({
-        name:
-          index === 0
-            ? `${toTitleCase(category)} Commands`
-            : `${toTitleCase(category)} Commands (cont.)`,
+        name: index === 0 ? `${toTitleCase(category)} Commands` : `${toTitleCase(category)} Commands (cont.)`,
         value: trim(chunk, FIELD_LIMIT),
         inline: false,
       });
@@ -206,68 +218,65 @@ function buildHelpOverviewEmbeds(commandRegistry, prefixName = "Serenity") {
   for (let i = 0; i < fieldQueue.length; i += MAX_FIELDS_PER_EMBED) {
     const fields = fieldQueue.slice(i, i + MAX_FIELDS_PER_EMBED);
 
-    embeds.push(
-      makeEmbed({
-        title: i === 0 ? "Help Menu" : "Help Menu (cont.)",
-        description:
-          i === 0
-            ? trim(
-                `Use \`/help command:<name>\` for detailed help on one command.\nPrefix commands can be used like \`${prefixName} help ban\` where supported.`,
-                EMBED_DESCRIPTION_LIMIT
-              )
-            : undefined,
-        fields,
-      })
-    );
+    embeds.push(makeEmbed({
+      title: i === 0 ? 'Help Menu' : 'Help Menu (cont.)',
+      description: i === 0
+        ? trim(
+          `Use \`/help command:<name>\` for detailed help on one command. Prefix commands can be used like \`${prefixName} help ban\` where supported.`,
+          EMBED_DESCRIPTION_LIMIT,
+        )
+        : undefined,
+      fields,
+    }));
   }
 
   return embeds;
 }
 
-function buildHelpCommandEmbed(commandRegistry, query, prefixName = "Serenity") {
+function buildHelpCommandEmbed(commandRegistry, query, prefixName = 'Serenity') {
   const command = findCommand(commandRegistry, query);
 
   if (!command) {
     return makeWarningEmbed({
-      title: "Unknown command",
+      title: 'Unknown command',
       description: `No help entry was found for \`${query}\`.`,
     });
   }
 
   const name = getCommandName(command);
   const description = trim(getCommandDescription(command), EMBED_DESCRIPTION_LIMIT);
-  const usage = trim(getCommandUsage(command), FIELD_LIMIT);
+  const usage = getCommandUsage(command);
   const examples = getCommandExamples(command)
     .filter(Boolean)
     .map((example) => `• \`${trim(example, 120)}\``)
-    .join("\n") || "None";
-  const aliases = command?.aliases || command?.meta?.aliases || [];
+    .join('\n') || 'None';
+  const aliases = command?.aliases || getMeta(command).aliases || [];
   const slashUsage = `/${name}`;
-  const prefixUsage = supportsPrefix(command) ? `${prefixName} ${name}` : "Not supported";
+  const prefixUsage = getCommandPrefixUsage(command, prefixName);
   const permissions = trim(getCommandPermissions(command), FIELD_LIMIT);
 
   return makeInfoEmbed({
     title: `Help • /${name}`,
     description,
     fields: [
-      { name: "Category", value: toTitleCase(getCommandCategory(command)), inline: true },
-      { name: "Permissions", value: permissions, inline: true },
-      { name: "Slash Usage", value: `\`${slashUsage}\``, inline: false },
-      { name: "Prefix Usage", value: `\`${prefixUsage}\``, inline: false },
-      { name: "Full Usage", value: `\`${usage}\``, inline: false },
+      { name: 'Category', value: toTitleCase(getCommandCategory(command)), inline: true },
+      { name: 'Permissions', value: permissions, inline: true },
+      { name: 'Slash Usage', value: `\`${slashUsage}\``, inline: false },
+      { name: 'Prefix Usage', value: formatCommandList(prefixUsage), inline: false },
+      { name: 'Full Usage', value: formatCommandList(usage), inline: false },
       {
-        name: "Aliases",
-        value: aliases.length ? aliases.map((alias) => `\`${alias}\``).join(", ") : "None",
+        name: 'Aliases',
+        value: aliases.length ? aliases.map((alias) => `\`${alias}\``).join(', ') : 'None',
         inline: false,
       },
-      { name: "Examples", value: trim(examples, FIELD_LIMIT), inline: false },
+      { name: 'Examples', value: trim(examples, FIELD_LIMIT), inline: false },
     ],
   });
 }
 
 module.exports = {
-  buildHelpOverviewEmbeds,
   buildHelpCommandEmbed,
+  buildHelpOverviewEmbeds,
   findCommand,
   getAllCommands,
 };

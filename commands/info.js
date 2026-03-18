@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { loadModerationState } = require('../storage/moderationStore');
 const { makeEmbed, makeInfoEmbed } = require('../utils/embeds');
+const { buildAvatarEmbed } = require('../services/infoService');
 const { trimText } = require('../utils/helpers');
 const { resolveMemberFromToken, resolveUserFromToken } = require('../services/prefixService');
 
@@ -191,12 +192,13 @@ module.exports = {
       name: 'avatar',
       metadata: {
         category: 'utility',
-        description: 'Show a user avatar.',
+        description: 'Show a user avatar publicly.',
         usage: ['/avatar', '/avatar user:@member'],
-        prefixEnabled: false,
-        examples: ['/avatar @User'],
+        prefixEnabled: true,
+        prefixUsage: ['Serenity avatar', 'Serenity avatar @user'],
+        examples: ['/avatar', '/avatar user:@User', 'Serenity avatar @User'],
         permissions: ['Everyone'],
-        response: 'ephemeral',
+        response: 'public',
       },
       data: new SlashCommandBuilder()
         .setName('avatar')
@@ -204,7 +206,11 @@ module.exports = {
         .addUserOption((option) => option.setName('user').setDescription('User whose avatar to show')),
       async execute({ interaction }) {
         const user = interaction.options.getUser('user') || interaction.user;
-        return interaction.reply({ embeds: [makeEmbed({ title: `Avatar • ${user.tag}`, image: user.displayAvatarURL({ size: 1024 }) })], ephemeral: true });
+        return interaction.reply({ embeds: [buildAvatarEmbed(user)] });
+      },
+      async executePrefix({ client, message, args }) {
+        const user = args[0] ? await resolveUserFromToken(client, args[0]).catch(() => null) : message.author;
+        return message.reply({ embeds: [buildAvatarEmbed(user || message.author)] });
       },
     },
     {

@@ -10,6 +10,7 @@ const {
   registerCommands,
 } = require('./handlers/interactionHandler');
 const { createMessageHandler } = require('./handlers/messageHandler');
+const { createGuildMemberAddHandler } = require('./handlers/guildMemberHandler');
 const { ensureClientsStore } = require('./storage/clientsStore');
 const { ensureConfigStorage } = require('./services/configService');
 const { ensureModerationStore } = require('./storage/moderationStore');
@@ -75,6 +76,7 @@ function createDiscordClient() {
 function attachHandlers(client, commandRegistry) {
   client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry));
   client.on(Events.MessageCreate, createMessageHandler(client, commandRegistry, PREFIX_NAME));
+  client.on(Events.GuildMemberAdd, createGuildMemberAddHandler(client));
 }
 
 function startBackgroundJobs(client) {
