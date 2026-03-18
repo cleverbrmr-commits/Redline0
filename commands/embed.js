@@ -15,6 +15,15 @@ module.exports = {
   commands: [
     {
       name: "embed",
+      metadata: {
+        category: "admin",
+        description: "Create, store, preview, and send reusable custom embeds.",
+        usage: ["/embed <create|list|edit|delete|send|preview> ..."],
+        prefixEnabled: false,
+        examples: ["/embed list", "/embed create name:rules title:Rules description:Be nice"],
+        permissions: ["Manage Guild"],
+        response: "ephemeral",
+      },
       data: new SlashCommandBuilder()
         .setName("embed")
         .setDescription("Create and manage reusable custom embeds")

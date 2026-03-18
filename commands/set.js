@@ -7,6 +7,15 @@ module.exports = {
   commands: [
     {
       name: "set",
+      metadata: {
+        category: "admin",
+        description: "Configure runtime channels and bot settings.",
+        usage: ["/set <downloadlog|modlog|prisonlog|announcelog|show|reset>"],
+        prefixEnabled: false,
+        examples: ["/set modlog channel:#mod-log", "/set show"],
+        permissions: ["Manage Guild"],
+        response: "ephemeral",
+      },
       data: new SlashCommandBuilder()
         .setName("set")
         .setDescription("Configure bot channels and runtime settings")

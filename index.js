@@ -9,6 +9,15 @@ const {
   createInteractionHandler,
   registerCommands,
 } = require('./handlers/interactionHandler');
+const { createMessageHandler } = require('./handlers/messageHandler');
+const { ensureClientsStore } = require('./storage/clientsStore');
+const { ensureConfigStorage } = require('./services/configService');
+const { ensureModerationStore } = require('./storage/moderationStore');
+const { ensureYoutubeStore } = require('./storage/youtubeStore');
+const { startTempbanScheduler } = require('./services/moderationService');
+const { startYoutubePolling } = require('./services/youtubeService');
+
+const PREFIX_NAME = process.env.BOT_PREFIX_NAME || 'Serenity';
 
 function validateEnv() {
   const required = ['DISCORD_TOKEN', 'CLIENT_ID', 'GUILD_ID'];
@@ -26,76 +35,86 @@ function loadCommandModules(commandsPath) {
     return [];
   }
 
-  const files = fs
+  return fs
     .readdirSync(commandsPath)
     .filter((file) => file.endsWith('.js'))
-    .sort();
-
-  const modules = [];
-
-  for (const file of files) {
-    const filePath = path.join(commandsPath, file);
-
-    try {
+    .sort()
+    .map((file) => {
+      const filePath = path.join(commandsPath, file);
       delete require.cache[require.resolve(filePath)];
       const mod = require(filePath);
-
       if (!mod || !Array.isArray(mod.commands)) {
-        console.warn(`Skipping invalid command module: ${file}`);
-        continue;
+        throw new Error(`Invalid command module: ${file}`);
       }
-
-      modules.push(mod);
-      console.log(`Loaded command module: ${file} (${mod.commands.length} commands)`);
-    } catch (error) {
-      console.error(`Failed to load command module ${file}:`, error);
-    }
-  }
-
-  return modules;
+      console.log(`[startup] loaded command module ${file} (${mod.commands.length} commands)`);
+      console.log(`[startup] module ${file} commands: ${mod.commands.map((command) => command?.name || '<invalid>').join(', ')}`);
+      return mod;
+    });
 }
 
-validateEnv();
+async function initializeStorage() {
+  await Promise.all([
+    ensureClientsStore(),
+    ensureConfigStorage(),
+    ensureModerationStore(),
+    ensureYoutubeStore(),
+  ]);
+}
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-  ],
-});
+function createDiscordClient() {
+  return new Client({
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.GuildVoiceStates,
+      GatewayIntentBits.MessageContent,
+    ],
+  });
+}
 
-const commandModules = loadCommandModules(path.join(__dirname, 'commands'));
-const commandRegistry = buildCommandRegistry(commandModules);
+function attachHandlers(client, commandRegistry) {
+  client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry));
+  client.on(Events.MessageCreate, createMessageHandler(client, commandRegistry, PREFIX_NAME));
+  console.log(`[startup] attached interaction handler (${client.listenerCount(Events.InteractionCreate)} listener total)`);
+  console.log(`[startup] attached message handler (${client.listenerCount(Events.MessageCreate)} listener total)`);
+  console.log(`[startup] prefix parser active for ${PREFIX_NAME}`);
+}
 
-client.commands = new Collection(
-  [...commandRegistry.entries()].map(([name, command]) => [name, command])
-);
+function startBackgroundJobs(client) {
+  startTempbanScheduler(client);
+  startYoutubePolling(client);
+}
 
-client.once(Events.ClientReady, async (readyClient) => {
-  console.log(`Logged in as ${readyClient.user.tag}`);
-  console.log(`Loaded ${commandRegistry.size} slash command(s).`);
+async function bootstrap() {
+  validateEnv();
+  await initializeStorage();
 
-  try {
-    await registerCommands(commandRegistry);
-    console.log('Slash commands registered successfully.');
-  } catch (error) {
-    console.error('Failed to register slash commands:', error);
-  }
-});
+  const client = createDiscordClient();
+  const commandModules = loadCommandModules(path.join(__dirname, 'commands'));
+  const commandRegistry = buildCommandRegistry(commandModules);
 
-client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry));
+  client.commands = new Collection([...commandRegistry.entries()].map(([name, command]) => [name, command]));
+  attachHandlers(client, commandRegistry);
 
-process.on('unhandledRejection', (error) => {
-  console.error('Unhandled promise rejection:', error);
-});
+  client.once(Events.ClientReady, async (readyClient) => {
+    console.log(`Logged in as ${readyClient.user.tag}`);
+    console.log(`[startup] loaded ${commandRegistry.size} slash command definitions`);
+    console.log(`[startup] registration scope: guild ${process.env.GUILD_ID}`);
 
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught exception:', error);
-});
+    const registeredCount = await registerCommands(commandRegistry);
+    console.log(`[startup] registered ${registeredCount} slash commands`);
+    startBackgroundJobs(client);
+    console.log('[startup] background jobs started');
+  });
 
-client.login(process.env.DISCORD_TOKEN).catch((error) => {
-  console.error('Failed to log in:', error);
+  process.on('unhandledRejection', (error) => console.error('Unhandled promise rejection:', error));
+  process.on('uncaughtException', (error) => console.error('Uncaught exception:', error));
+
+  await client.login(process.env.DISCORD_TOKEN);
+}
+
+bootstrap().catch((error) => {
+  console.error('Failed to bootstrap bot:', error);
   process.exit(1);
 });
