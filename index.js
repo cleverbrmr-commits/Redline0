@@ -1089,20 +1089,7 @@ client.on(Events.InteractionCreate, async (i) => {
 
     const embed = makeEmbed({ title: "Operation failed", description: prettyError(err), color: Colors.Orange });
 
-    if (i.deferred) {
-      try {
-        await i.editReply({ embeds: [embed] });
-      } catch {}
-    } else if (i.replied) {
-      try {
-        await i.followUp({ embeds: [embed], ephemeral: true });
-      } catch {}
-    } else {
-      try {
-        await i.reply({ embeds: [embed], ephemeral: true });
-      } catch {}
-    }
-  }
-});
+client.once(Events.ClientReady, handleReady);
+client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry));
 
 client.login(process.env.DISCORD_TOKEN);
