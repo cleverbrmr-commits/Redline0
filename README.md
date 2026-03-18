@@ -1,26 +1,23 @@
 # REDLINE CLIENT HUB
 
-Redline is a modular Discord.js v14 bot for client delivery, moderation, help tooling, and YouTube notifications. The architecture stays split across `commands/`, `handlers/`, `services/`, `storage/`, and `utils/`, while `index.js` remains bootstrap-only.
+Redline is a modular Discord.js v14 bot for client delivery, moderation, help tooling, welcome automation, reaction polls, and YouTube notifications. The architecture stays split across `commands/`, `handlers/`, `services/`, `storage/`, and `utils/`, while `index.js` remains bootstrap-only.
 
 ## Root cause / design analysis
 
-The main issues in the previous build were structural drift and missing shared systems:
+The current build keeps the bot modular while fixing three gaps that mattered for server operations:
 
-- moderation logic was fragmented and incomplete for the requested command surface,
-- there was no centralized prefix parser using the bot name,
-- help content was not generated from shared command metadata,
-- `/userinfo` and `/serverinfo` replied ephemerally instead of publicly,
-- persistent moderation records were too narrow for tempbans, infractions, and mute config,
-- YouTube notifications were not modularized around reusable storage and polling services.
+- welcome automation did not exist as a reusable service with stored guild configuration,
+- `/avatar` was private even though it should behave like a normal public utility command,
+- polls were missing entirely, including reusable validation, formatting, and reaction handling for both slash and prefix flows.
 
-The current build fixes that by:
+The implementation now fixes that by:
 
 - keeping `index.js` limited to env loading, validation, client creation, command loading, handler attachment, slash registration, background job startup, and login,
-- moving prefix parsing into `handlers/messageHandler.js` + `services/prefixService.js`,
-- moving moderation persistence and scheduling into `services/moderationService.js` + `storage/moderationStore.js`,
-- moving help generation into `services/helpService.js`,
-- moving YouTube search / subscription / polling logic into `services/youtubeService.js` + `storage/youtubeStore.js`,
-- storing shared command metadata directly on command definitions so help text and README stay aligned.
+- adding a dedicated guild-member join handler that delegates all welcome delivery to `services/welcomerService.js`,
+- storing welcomer state in the existing config system instead of scattering one-off files,
+- adding a modular poll service that builds embed and plain polls from shared business logic,
+- making `/avatar` public and reusing shared avatar embed logic for slash and prefix execution,
+- tightening help metadata usage so new commands document themselves cleanly.
 
 ## Project structure
 
@@ -36,12 +33,15 @@ commands/
   help.js
   info.js
   moderation.js
+  poll.js
   prison.js
   removeclient.js
   set.js
   upload.js
+  welcomer.js
   youtube.js
 handlers/
+  guildMemberHandler.js
   interactionHandler.js
   messageHandler.js
 services/
@@ -49,10 +49,13 @@ services/
   configService.js
   embedService.js
   helpService.js
+  infoService.js
   logService.js
   moderationService.js
   panelService.js
+  pollService.js
   prefixService.js
+  welcomerService.js
   youtubeService.js
 storage/
   clientsStore.js
@@ -111,6 +114,11 @@ The centralized message-command trigger is the bot name:
 - `Serenity purge 15`
 - `Serenity role add @user @Member`
 - `Serenity slowmode off`
+- `Serenity welcomer set #welcome`
+- `Serenity welcomer status`
+- `Serenity avatar @user`
+- `Serenity poll embed Best client? | Volt | Apex | Nova`
+- `Serenity poll normal Favorite mode? | Survival | PvP | Skyblock`
 - `Serenity yt-notify add <youtube-url> #uploads true`
 
 The leading bot name is parsed case-insensitively.
@@ -122,65 +130,95 @@ The leading bot name is parsed case-insensitively.
 - `/help command`
 - `/userinfo`
 - `/serverinfo`
+- `/avatar`
+- prefix `Serenity avatar`
+- the poll message created by `/poll` or `Serenity poll`
 - moderation action confirmations, unless the command is returning a private validation / permission error.
 - `/yt-notify` confirmations and lists.
 
 ### Ephemeral
+- `/welcomer` configuration responses
+- `/poll` confirmation replies after the public poll is posted
 - `/yt-search`
 - validation errors where private feedback is cleaner.
 - existing content-management utilities that already work better as staff-only ephemeral tools.
 
-## Moderation commands
+## Welcomer system
 
-### Moderation
-- `/ban user reason`
-- `/kick user reason`
-- `/timeout user duration reason`
-- `/unban user_id reason`
-- `/mute user reason`
-- `/unmute user reason`
-- `/warn user reason`
-- `/purge amount`
-- `/slowmode value`
-- `/lock [channel] reason`
-- `/unlock [channel] reason`
-- `/softban user reason`
-- `/tempban user duration reason`
-- `/infractions user`
-- `/clearwarns user`
-- `/nickname user nickname`
-- `/role add user role`
-- `/role remove user role`
-- `/vckick user reason`
+### What it does
 
-### Existing moderation / server tools preserved
-- `/prison`
-- `/unprison`
-- `/prisonlist`
-- `/prisonreason`
-- `/announce`
+The welcomer stores one config record per guild and, when enabled, sends a branded welcome embed whenever a new member joins.
 
-### Permission model
+Each welcome message includes:
 
-- `BanMembers`: `ban`, `unban`, `softban`, `tempban`
-- `KickMembers`: `kick`
-- `ModerateMembers`: `timeout`, `infractions`, `clearwarns`
-- `ManageRoles`: `mute`, `unmute`, `role add`, `role remove`
-- `ManageNicknames`: `nickname`
-- `ManageMessages`: `warn`, `purge`
-- `ManageChannels`: `slowmode`, `lock`, `unlock`
-- `MoveMembers`: `vckick`
-- `ManageGuild`: `yt-notify`, content/admin utilities
+- a mention of the joining user,
+- the title `Welcome to Redline Hub`,
+- a high-quality version of the member avatar,
+- server/member context such as server name, member count, and join timestamp,
+- Redline-styled branding without overloading the embed.
 
-### Hierarchy protections
+### Slash commands
 
-The moderation system blocks actions against:
+- `/welcomer set channel:#welcome`
+- `/welcomer on`
+- `/welcomer off`
+- `/welcomer status`
 
-- yourself,
-- the guild owner,
-- the bot,
-- members with equal or higher role position,
-- targets the bot cannot manage because of role order.
+### Prefix commands
+
+- `Serenity welcomer set #welcome`
+- `Serenity welcomer on`
+- `Serenity welcomer off`
+- `Serenity welcomer status`
+
+### Permissions needed
+
+- Slash: `Manage Guild`
+- Prefix: the invoking member must have `Manage Guild`
+- Target channels must be valid server text or announcement channels.
+
+### Setup flow
+
+1. Run `/welcomer set channel:#welcome`.
+2. Run `/welcomer on`.
+3. Use `/welcomer status` any time to confirm the stored state.
+4. Run `/welcomer off` to disable the system without losing the saved channel.
+
+If the stored welcome channel is missing or no longer sendable, the bot skips the message safely and logs the issue instead of crashing.
+
+## Poll system
+
+### Slash command structure
+
+- `/poll embed question option1 option2 [option3...]`
+- `/poll normal question option1 option2 [option3...]`
+
+Slash polls require at least two options and support up to ten options.
+
+### Prefix command structure
+
+Use `|` as the delimiter:
+
+- `Serenity poll embed Best client? | Volt | Apex | Nova`
+- `Serenity poll normal Favorite mode? | Survival | PvP | Skyblock`
+
+### Embed mode
+
+Embed polls post a styled Redline embed that includes:
+
+- the poll question as the title,
+- an emoji-numbered option list,
+- the poll creator,
+- a timestamp.
+
+### Normal mode
+
+Normal polls post a plain text poll message with the same numbered options and automatic reactions, but without an embed.
+
+### Permissions needed
+
+- Slash: `Manage Messages`
+- Prefix: the invoking member must have `Manage Messages`
 
 ## Help system
 
@@ -194,7 +232,6 @@ Detailed help includes:
 - slash usage,
 - prefix usage when supported,
 - examples,
-- restrictions / hierarchy notes,
 - response visibility.
 
 ## Utility commands
@@ -203,9 +240,10 @@ Detailed help includes:
 - `/userinfo`
 - `/serverinfo`
 - `/roleinfo`
-- `/avatar`
+- `/avatar` *(public)*
 - `/ping`
 - `/botinfo`
+- `/poll`
 - `/yt-search`
 
 ## YouTube system
@@ -260,7 +298,7 @@ Preserved and documented commands:
 - `moderation.json` — infractions, tempbans, mute role config, locked-channel state.
 - `youtube-subscriptions.json` — YouTube subscriptions and last seen uploads.
 - `prison-state.json` — prison records and removed roles.
-- `config.json` — runtime bot channel config.
+- `config.json` — runtime bot channel config plus per-guild welcomer settings.
 - `embeds.json` — saved custom embeds.
 
 ### On startup
@@ -275,6 +313,7 @@ Preserved and documented commands:
 - warnings and other moderation actions are stored in the infractions history.
 - the mute system stores the created mute role ID per guild.
 - channel lock state stores the prior `@everyone` send-message setting so unlock can restore it cleanly.
+- welcomer settings are stored under `config.json` as `welcomers[guildId] = { enabled, channelId }`.
 
 ## Needed from user
 
