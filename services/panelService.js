@@ -8,10 +8,9 @@ const {
   StringSelectMenuOptionBuilder,
 } = require("discord.js");
 const { UPLOADS_DIR } = require("../storage/clientsStore");
-const { loadConfig } = require("./configService");
 const { buildClientFields, getVisibleCategories, getVisibleClientEntries, loadModules } = require("./clientService");
 const { logDownload } = require("./logService");
-const { makeEmbed, makeInfoEmbed, makeSuccessEmbed } = require("../utils/embeds");
+const { makeEmbed, makeInfoEmbed, makeSuccessEmbed, makeWarningEmbed } = require("../utils/embeds");
 const {
   BRAND,
   DOWNLOAD_COOLDOWN_MS,
@@ -19,35 +18,21 @@ const {
   brandColor,
   brandEmoji,
   buildClientAttachment,
-  formatDuration,
   resolveInteractionContext,
   resolveModulePath,
   resolveSendableChannel,
-  trimText,
 } = require("../utils/helpers");
 const { isVisibleToMember } = require("../utils/permissions");
 
 const downloadCooldowns = new Map();
-const IDS = {
-  category: (mode) => `clients:category:${mode}`,
-  item: (mode, category) => `clients:item:${mode}:${category}`,
-  refresh: (mode) => `clients:refresh:${mode}`,
-  back: (mode) => `clients:back:${mode}`,
-  reopen: (mode, category) => `clients:reopen:${mode}:${category}`,
-};
-
-async function getCooldownMs() {
-  const config = await loadConfig();
-  return Number(config.defaultCooldowns?.clientsDownloadMs) || DOWNLOAD_COOLDOWN_MS;
-}
 
 function getCooldownRemaining(userId) {
   const endsAt = downloadCooldowns.get(userId) || 0;
   return Math.max(0, endsAt - Date.now());
 }
 
-function setCooldown(userId, cooldownMs) {
-  downloadCooldowns.set(userId, Date.now() + cooldownMs);
+function setCooldown(userId) {
+  downloadCooldowns.set(userId, Date.now() + DOWNLOAD_COOLDOWN_MS);
 }
 
 function buildCategoryActionRow(categories, customId) {
@@ -70,17 +55,18 @@ function buildCategoryActionRow(categories, customId) {
 
 function buildClientActionRow(modules, member, category, mode) {
   const visibleClients = getVisibleClientEntries(modules, member, category).slice(0, MAX_MENU_OPTIONS);
+
   if (!visibleClients.length) return null;
 
   const menu = new StringSelectMenuBuilder()
-    .setCustomId(IDS.item(mode, category))
+    .setCustomId(`client_select:${mode}:${category}`)
     .setPlaceholder(`Choose a ${category} client...`)
     .addOptions(
       visibleClients.map(([key, mod]) =>
         new StringSelectMenuOptionBuilder()
-          .setLabel(trimText(mod.label, 100))
+          .setLabel(require("../utils/helpers").trimText(mod.label, 100))
           .setValue(key)
-          .setDescription(trimText(`${mod.version} • ${mod.loader} • ${mod.status}`, 100))
+          .setDescription(require("../utils/helpers").trimText(`${mod.version} • ${mod.loader} • ${mod.status}`, 100))
       )
     );
 
@@ -89,62 +75,74 @@ function buildClientActionRow(modules, member, category, mode) {
 
 function buildBrowserNavigationRow(mode, category = null) {
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(IDS.refresh(mode)).setLabel("Refresh Browser").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(IDS.back(mode)).setLabel("Back to Categories").setStyle(ButtonStyle.Primary)
+    new ButtonBuilder()
+      .setCustomId(`browser_refresh:${mode}`)
+      .setLabel("Refresh Browser")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`browser_back:${mode}`)
+      .setLabel("Back to Categories")
+      .setStyle(ButtonStyle.Primary)
   );
 
   if (category) {
-    row.addComponents(new ButtonBuilder().setCustomId(IDS.reopen(mode, category)).setLabel("Reopen Category").setStyle(ButtonStyle.Danger));
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`browser_reopen:${mode}:${category}`)
+        .setLabel("Reopen Category")
+        .setStyle(ButtonStyle.Success)
+    );
   }
 
   return row;
 }
 
-async function buildCategoryBrowserEmbed(visibleCategories, mode = "private") {
-  const cooldownMs = await getCooldownMs();
+function buildCategoryBrowserEmbed(visibleCategories, mode = "private") {
   const isPrivate = mode === "private";
 
   if (isPrivate) {
     return makeInfoEmbed({
       title: `${brandEmoji()} ${BRAND.name}`,
-      description: "Browse by category, then pick a client to receive metadata and files privately.",
+      description: "Browse by category, then pick a client to get a private metadata card + download.",
       fields: [
         { name: "Categories", value: String(visibleCategories.length), inline: true },
-        { name: "Cooldown", value: formatDuration(cooldownMs), inline: true },
-        { name: "Privacy", value: "Every client result is returned ephemerally to you only.", inline: false },
+        { name: "Cooldown", value: `${DOWNLOAD_COOLDOWN_MS / 1000}s between downloads`, inline: true },
+        { name: "Recovery", value: "If this menu goes stale, use **Refresh Browser** to regenerate a fresh private browser.", inline: false },
       ],
     });
   }
 
   return makeEmbed({
-    title: `🩸 ${BRAND.name}`,
-    description: "Use the menu below to open a private client browser. Restricted items stay private and role-gated.",
-    color: Colors.DarkRed,
+    title: `🚀 ${BRAND.name}`,
+    description: "Premium client access panel. Use the menu to browse categories — all selections and files are delivered privately.",
+    color: Colors.Gold,
     fields: [
-      { name: "Access", value: "Role and permission checks are enforced per user.", inline: true },
-      { name: "Privacy", value: "Selections and downloads never post publicly.", inline: true },
-      { name: "How it works", value: "Choose a category, then choose a client, and Redline delivers the result privately." },
+      { name: "Access", value: "Role-based access is enforced per member.", inline: true },
+      { name: "Privacy", value: "Downloads are always ephemeral to the user.", inline: true },
+      { name: "Updates", value: "Panel data refreshes automatically when categories/clients change." },
+      { name: "How To Use", value: "1) Select category → 2) Select client → 3) Receive private file + metadata." },
     ],
+    footer: "REDLINE • Verified releases • Private delivery",
   });
 }
 
 function buildCategorySelectionEmbed(category, clientCount) {
   return makeEmbed({
     title: `${brandEmoji()} ${category}`,
-    description: "Choose a client below to view its metadata and receive the file privately.",
+    description: "Choose a client below to view metadata and privately download the file.",
     fields: [
-      { name: "Visible clients", value: String(clientCount), inline: true },
-      { name: "Recovery", value: "Use Refresh or Back to Categories if Discord loses the previous ephemeral response.", inline: false },
+      { name: "Visible Clients", value: String(clientCount), inline: true },
+      { name: "Recovery", value: "Use **Reopen Category** or **Back to Categories** if you return later and need a fresh menu.", inline: false },
     ],
     color: brandColor(),
   });
 }
 
 function buildRecoveryEmbed(title, description, category = null) {
-  return makeInfoEmbed({
+  return makeWarningEmbed({
     title,
     description,
-    fields: category ? [{ name: "Recovery", value: `Use Reopen Category to rebuild the ${category} menu.` }] : undefined,
+    fields: category ? [{ name: "Recovery", value: `Use **Reopen Category** to rebuild a fresh **${category}** browser.` }] : undefined,
   });
 }
 
@@ -158,19 +156,27 @@ async function buildPrivateCategoryBrowserPayload(client, interaction, mode = "p
   const modules = await loadModules();
   const member = actorMember || interaction.member;
   const visibleCategories = getVisibleCategories(modules, member);
-  const row = buildCategoryActionRow(visibleCategories, IDS.category(mode));
+  const row = buildCategoryActionRow(visibleCategories, `client_category_select:${mode}`);
 
   if (!row) {
     return {
-      content: "No clients are visible to you right now.",
-      embeds: extraEmbed ? [extraEmbed] : [],
+      embeds: [
+        makeInfoEmbed({
+          title: `${brandEmoji()} ${BRAND.name}`,
+          description: "No clients are visible to you right now.",
+          fields: [
+            { name: "Status", value: "No eligible client files found", inline: true },
+            { name: "Hint", value: "Ask staff for access or upload a client", inline: true },
+          ],
+        }),
+      ],
       components: [buildBrowserNavigationRow(mode)],
       ephemeral: true,
     };
   }
 
   return {
-    embeds: [extraEmbed || await buildCategoryBrowserEmbed(visibleCategories, "private")],
+    embeds: [extraEmbed || buildCategoryBrowserEmbed(visibleCategories, "private")],
     components: [row, buildBrowserNavigationRow(mode)],
     ephemeral: true,
   };
@@ -182,7 +188,7 @@ async function buildPrivateClientMenuPayload(client, interaction, category, mode
       client,
       interaction,
       mode,
-      recoveryEmbed || makeInfoEmbed({ title: `${brandEmoji()} Browser recovered`, description: "Category context was missing, so a fresh private browser was generated." })
+      recoveryEmbed || makeInfoEmbed({ title: `${brandEmoji()} Browser recovered`, description: "The previous category context was unavailable, so a fresh category browser was generated." })
     );
   }
 
@@ -195,7 +201,12 @@ async function buildPrivateClientMenuPayload(client, interaction, category, mode
   if (!visibleClients.length || !row) {
     return {
       embeds: [
-        recoveryEmbed || buildRecoveryEmbed("Category unavailable", `The ${category} browser is stale or empty. Use the controls below to recover.`, category),
+        recoveryEmbed ||
+          buildRecoveryEmbed(
+            "Category unavailable",
+            `The **${category}** menu is stale or no longer available to you. Regenerate your browser below.`,
+            category
+          ),
       ],
       components: [buildBrowserNavigationRow(mode, category)],
       ephemeral: true,
@@ -213,42 +224,38 @@ async function sendPrivateClientPanel(client, interaction) {
   return interaction.reply(await buildPrivateCategoryBrowserPayload(client, interaction, "private"));
 }
 
-async function buildPublicPanelMessage(visibleCategories) {
-  const row = buildCategoryActionRow(visibleCategories, IDS.category("public"));
+function buildPublicPanelMessage(visibleCategories) {
+  const row = buildCategoryActionRow(visibleCategories, "client_category_select:public");
   return {
-    embeds: [await buildCategoryBrowserEmbed(visibleCategories, "public")],
+    embeds: [buildCategoryBrowserEmbed(visibleCategories, "public")],
     components: row ? [row] : [],
   };
 }
 
-async function ensureDeferred(interaction) {
-  if (!interaction.deferred && !interaction.replied) {
-    await interaction.deferReply({ ephemeral: true });
-  }
-}
-
 async function handleCategorySelection(client, interaction, mode) {
-  await ensureDeferred(interaction);
   const category = interaction.values[0];
-  return interaction.editReply(await buildPrivateClientMenuPayload(client, interaction, category, mode));
+  return interaction.reply(await buildPrivateClientMenuPayload(client, interaction, category, mode));
 }
 
 async function handleClientSelection(client, interaction, mode, category) {
-  await ensureDeferred(interaction);
-
   if (!category) {
-    return interaction.editReply(await buildPrivateCategoryBrowserPayload(client, interaction, mode, makeInfoEmbed({
+    return interaction.reply(await buildPrivateCategoryBrowserPayload(client, interaction, mode, makeInfoEmbed({
       title: `${brandEmoji()} Browser recovered`,
-      description: "That client menu lost category context, so a fresh private browser was generated.",
+      description: "That client menu lost its category context, so a fresh private browser was generated.",
     })));
   }
 
   const remaining = getCooldownRemaining(interaction.user.id);
   if (remaining > 0) {
-    return interaction.editReply({
-      content: `Download cooldown active. Try again in ${formatDuration(remaining)}.`,
-      embeds: [],
+    return interaction.reply({
+      embeds: [
+        makeWarningEmbed({
+          title: "Slow down",
+          description: `Download cooldown active. Try again in **${Math.ceil(remaining / 1000)}s**.`,
+        }),
+      ],
       components: [buildBrowserNavigationRow(mode, category)],
+      ephemeral: true,
     });
   }
 
@@ -256,55 +263,74 @@ async function handleClientSelection(client, interaction, mode, category) {
   const mod = modules[interaction.values[0]];
 
   if (!mod) {
-    return interaction.editReply(await buildPrivateClientMenuPayload(client, interaction, category, mode, buildRecoveryEmbed("Download unavailable", "That client no longer exists. Open a fresh category browser below.", category)));
+    return interaction.reply({
+      ...(await buildPrivateClientMenuPayload(
+        client,
+        interaction,
+        category,
+        mode,
+        buildRecoveryEmbed("Download unavailable", "That client no longer exists. Open a fresh category browser below.", category)
+      )),
+    });
   }
 
   const { actorMember } = await resolveInteractionContext(client, interaction);
   const member = actorMember || interaction.member;
 
   if (!isVisibleToMember(member, mod)) {
-    return interaction.editReply({
-      content: "You no longer have access to that client.",
-      embeds: [],
-      components: [buildBrowserNavigationRow(mode, category)],
+    return interaction.reply({
+      ...(await buildPrivateClientMenuPayload(
+        client,
+        interaction,
+        category,
+        mode,
+        buildRecoveryEmbed("Access denied", "You no longer have access to that client. Reopen the category browser to view what is still available.", category)
+      )),
     });
   }
 
   const filePath = resolveModulePath(mod, UPLOADS_DIR);
   if (!filePath || !fs.existsSync(filePath)) {
-    return interaction.editReply({
-      content: "That client file is missing from storage.",
-      embeds: [],
-      components: [buildBrowserNavigationRow(mode, category)],
+    return interaction.reply({
+      ...(await buildPrivateClientMenuPayload(
+        client,
+        interaction,
+        category,
+        mode,
+        buildRecoveryEmbed("Missing file", "The file for that client is missing from storage. Regenerate the category browser or choose another client.", category)
+      )),
     });
   }
 
-  const cooldownMs = await getCooldownMs();
-  setCooldown(interaction.user.id, cooldownMs);
+  setCooldown(interaction.user.id);
   const file = buildClientAttachment(mod, filePath);
   await logDownload(client, interaction, mod);
 
-  return interaction.editReply({
+  return interaction.reply({
     embeds: [
       makeSuccessEmbed({
         title: `${brandEmoji()} ${mod.label}`,
         description: "Your client is attached below.",
-        fields: [...buildClientFields(mod)],
+        fields: [
+          ...buildClientFields(mod),
+          { name: "Browser Tools", value: "Use **Reopen Category** to regenerate this private menu later.", inline: false },
+        ],
       }),
     ],
     files: [file],
     components: [buildBrowserNavigationRow(mode, category)],
+    ephemeral: true,
   });
 }
 
 async function handleStringSelect(client, interaction) {
-  if (interaction.customId.startsWith("clients:category:")) {
-    const [, , mode] = interaction.customId.split(":");
+  if (interaction.customId.startsWith("client_category_select:")) {
+    const [, mode] = interaction.customId.split(":");
     return handleCategorySelection(client, interaction, mode || "private");
   }
 
-  if (interaction.customId.startsWith("clients:item:")) {
-    const [, , mode, category] = interaction.customId.split(":");
+  if (interaction.customId.startsWith("client_select:")) {
+    const [, mode, category] = interaction.customId.split(":");
     return handleClientSelection(client, interaction, mode || "private", category || null);
   }
 
@@ -312,30 +338,28 @@ async function handleStringSelect(client, interaction) {
 }
 
 async function handleButton(client, interaction) {
-  if (interaction.customId.startsWith("clients:refresh:")) {
-    const [, , mode] = interaction.customId.split(":");
-    await ensureDeferred(interaction);
-    return interaction.editReply(await buildPrivateCategoryBrowserPayload(client, interaction, mode || "private", makeInfoEmbed({
+  if (interaction.customId.startsWith("browser_refresh:")) {
+    const [, mode] = interaction.customId.split(":");
+    return interaction.reply(await buildPrivateCategoryBrowserPayload(client, interaction, mode || "private", makeInfoEmbed({
       title: `${brandEmoji()} Browser refreshed`,
-      description: "A fresh private category browser has been generated.",
+      description: "A fresh private category browser has been generated for you.",
     })));
   }
 
-  if (interaction.customId.startsWith("clients:back:")) {
-    const [, , mode] = interaction.customId.split(":");
-    await ensureDeferred(interaction);
-    return interaction.editReply(await buildPrivateCategoryBrowserPayload(client, interaction, mode || "private", makeInfoEmbed({
+  if (interaction.customId.startsWith("browser_back:")) {
+    const [, mode] = interaction.customId.split(":");
+    return interaction.reply(await buildPrivateCategoryBrowserPayload(client, interaction, mode || "private", makeInfoEmbed({
       title: `${brandEmoji()} Categories reopened`,
       description: "You are back at the private category browser.",
     })));
   }
 
-  if (interaction.customId.startsWith("clients:reopen:")) {
-    const [, , mode, category] = interaction.customId.split(":");
-    await ensureDeferred(interaction);
-    return interaction.editReply(await buildPrivateClientMenuPayload(client, interaction, category, mode || "private", makeInfoEmbed({
+  if (interaction.customId.startsWith("browser_reopen:")) {
+    const [, mode, category] = interaction.customId.split(":");
+    return interaction.reply(await buildPrivateClientMenuPayload(client, interaction, category, mode || "private", makeInfoEmbed({
       title: `${brandEmoji()} ${category}`,
-      description: "A fresh private client menu has been generated for this category.",
+      description: "A fresh private client menu has been regenerated for this category.",
+      fields: [{ name: "Recovery", value: "Use the menu below or return to categories at any time." }],
     })));
   }
 
@@ -347,6 +371,8 @@ module.exports = {
   buildPrivateClientMenuPayload,
   buildPublicPanelMessage,
   handleButton,
+  handleCategorySelection,
+  handleClientSelection,
   handleStringSelect,
   resolveSendableInteractionChannel,
   sendPrivateClientPanel,

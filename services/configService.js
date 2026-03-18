@@ -1,4 +1,3 @@
-const { DOWNLOAD_COOLDOWN_MS } = require("../utils/helpers");
 const { ensureConfigStore, loadConfigRaw, saveConfigRaw } = require("../storage/configStore");
 
 const DEFAULT_CONFIG = {
@@ -6,15 +5,6 @@ const DEFAULT_CONFIG = {
   modLogChannelId: null,
   prisonLogChannelId: null,
   announceLogChannelId: null,
-  prisonerRoleId: null,
-  commandRoleOverrides: {
-    trustedMods: [],
-    admins: [],
-    contentManagers: [],
-  },
-  defaultCooldowns: {
-    clientsDownloadMs: DOWNLOAD_COOLDOWN_MS,
-  },
 };
 
 function getConfiguredLogChannelId(config, key) {
@@ -34,7 +24,6 @@ function getConfigDisplayRows(config) {
     ["Moderation log", config.modLogChannelId],
     ["Prison log", config.prisonLogChannelId],
     ["Announcement log", config.announceLogChannelId],
-    ["Prisoner role", config.prisonerRoleId],
   ];
 }
 
@@ -47,14 +36,6 @@ async function loadConfig() {
   return {
     ...DEFAULT_CONFIG,
     ...raw,
-    commandRoleOverrides: {
-      ...DEFAULT_CONFIG.commandRoleOverrides,
-      ...(raw.commandRoleOverrides || {}),
-    },
-    defaultCooldowns: {
-      ...DEFAULT_CONFIG.defaultCooldowns,
-      ...(raw.defaultCooldowns || {}),
-    },
   };
 }
 
@@ -62,14 +43,6 @@ async function saveConfig(config) {
   await saveConfigRaw({
     ...DEFAULT_CONFIG,
     ...config,
-    commandRoleOverrides: {
-      ...DEFAULT_CONFIG.commandRoleOverrides,
-      ...(config.commandRoleOverrides || {}),
-    },
-    defaultCooldowns: {
-      ...DEFAULT_CONFIG.defaultCooldowns,
-      ...(config.defaultCooldowns || {}),
-    },
   });
 }
 

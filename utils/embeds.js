@@ -1,9 +1,9 @@
 const { Colors, EmbedBuilder } = require("discord.js");
-const { BRAND } = require("./helpers");
+const { BRAND, brandColor } = require("./helpers");
 
 function makeEmbed({ title, description, color, fields, footer, author, thumbnail, image, timestamp }) {
   const embed = new EmbedBuilder()
-    .setColor(color || Colors.DarkRed)
+    .setColor(color || brandColor())
     .setTitle(title)
     .setDescription(description)
     .setFooter({ text: footer || BRAND.footer });
@@ -22,10 +22,10 @@ function makeEmbed({ title, description, color, fields, footer, author, thumbnai
 
 function makeStatusEmbed(type, { title, description, fields, footer }) {
   const tones = {
-    success: Colors.Red,
-    error: Colors.DarkRed,
+    success: Colors.Green,
+    error: Colors.Red,
     warning: Colors.Orange,
-    info: Colors.DarkButNotBlack,
+    info: Colors.Blurple,
   };
 
   return makeEmbed({
@@ -33,7 +33,7 @@ function makeStatusEmbed(type, { title, description, fields, footer }) {
     description,
     fields,
     footer,
-    color: tones[type] || Colors.DarkRed,
+    color: tones[type] || brandColor(),
   });
 }
 
@@ -53,24 +53,10 @@ function makeInfoEmbed(payload) {
   return makeStatusEmbed("info", payload);
 }
 
-function makeModerationEmbed({ action, moderator, target, reason, extraFields = [], color = Colors.DarkRed }) {
-  return makeEmbed({
-    title: `🛡️ ${action}`,
-    color,
-    fields: [
-      { name: "Moderator", value: moderator || "Unknown", inline: true },
-      { name: "Target", value: target || "Unknown", inline: true },
-      { name: "Reason", value: reason || "No reason provided" },
-      ...extraFields,
-    ],
-  });
-}
-
 module.exports = {
   makeEmbed,
   makeErrorEmbed,
   makeInfoEmbed,
-  makeModerationEmbed,
   makeStatusEmbed,
   makeSuccessEmbed,
   makeWarningEmbed,

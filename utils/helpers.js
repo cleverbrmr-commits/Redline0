@@ -17,13 +17,15 @@ const MAX_MENU_OPTIONS = 25;
 
 const BRAND = {
   name: "REDLINE CLIENT HUB",
-  footer: "REDLINE • Redline secure delivery",
-  emojiPool: ["🔥", "🩸", "⚠️", "🚨", "🛡️", "📦"],
+  footer: "REDLINE • Clean drops. Fast access.",
+  emojiPool: ["🔥", "⚡", "🩸", "🧨", "🚀", "🛠️"],
   colors: [
     Colors.Red,
     Colors.DarkRed,
+    Colors.OrangeRed,
+    Colors.Gold,
+    Colors.Blurple,
     Colors.DarkButNotBlack,
-    Colors.DarkGrey,
   ],
 };
 
@@ -120,16 +122,8 @@ async function resolveSendableChannel(client, channelId, fallbackChannel = null)
   return channel;
 }
 
-function formatDuration(ms) {
-  if (!ms || ms <= 0) return "0s";
-  const totalSeconds = Math.ceil(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return [hours ? `${hours}h` : null, minutes ? `${minutes}m` : null, seconds ? `${seconds}s` : null].filter(Boolean).join(" ");
-}
-
 module.exports = {
+  BACKUP_FILE_PREFIX: "backup",
   BRAND,
   CATEGORY_OPTIONS,
   DOWNLOAD_COOLDOWN_MS,
@@ -142,7 +136,6 @@ module.exports = {
   brandColor,
   brandEmoji,
   buildClientAttachment,
-  formatDuration,
   formatRoleMention,
   getStoredFileNameForKey,
   normalizeCategory,

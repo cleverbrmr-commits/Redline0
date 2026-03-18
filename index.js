@@ -1,56 +1,86 @@
-require("dotenv").config();
+require('dotenv').config();
 
-const { Client, Events, GatewayIntentBits } = require("discord.js");
-const clientsCommand = require("./commands/clients");
-const clientpanelCommand = require("./commands/clientpanel");
-const uploadCommand = require("./commands/upload");
-const editclientCommand = require("./commands/editclient");
-const removeclientCommand = require("./commands/removeclient");
-const setCommand = require("./commands/set");
-const embedCommand = require("./commands/embed");
-const moderationCommand = require("./commands/moderation");
-const infoCommand = require("./commands/info");
-const adminCommand = require("./commands/admin");
-const { buildCommandRegistry, createInteractionHandler, registerCommands } = require("./handlers/interactionHandler");
-const { ensureClientsStore } = require("./storage/clientsStore");
-const { ensureEmbedsStore } = require("./storage/embedsStore");
-const { ensureWarningsStore } = require("./storage/warningsStore");
-const { ensureConfigStorage } = require("./services/configService");
-const { validateEnv } = require("./utils/helpers");
+const { Client, GatewayIntentBits, Collection } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
-});
+function validateEnv() {
+  const required = ['DISCORD_TOKEN', 'CLIENT_ID'];
+  const missing = required.filter((key) => !process.env[key]);
 
-const commandRegistry = buildCommandRegistry([
-  clientsCommand,
-  clientpanelCommand,
-  uploadCommand,
-  editclientCommand,
-  removeclientCommand,
-  setCommand,
-  embedCommand,
-  moderationCommand,
-  infoCommand,
-  adminCommand,
-]);
-
-async function handleReady() {
-  try {
-    validateEnv();
-    await ensureClientsStore();
-    await ensureConfigStorage();
-    await ensureEmbedsStore();
-    await ensureWarningsStore();
-    await registerCommands(commandRegistry);
-    console.log(`Logged in as ${client.user.tag}`);
-    console.log("Bot ready");
-  } catch (err) {
-    console.error("Startup error:", err);
+  if (missing.length) {
+    console.error(`Missing required environment variables: ${missing.join(', ')}`);
+    process.exit(1);
   }
 }
 
-client.once(Events.ClientReady, handleReady);
-client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry));
+validateEnv();
 
-client.login(process.env.DISCORD_TOKEN);
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
+
+client.commands = new Collection();
+
+const commandsPath = path.join(__dirname, 'commands');
+if (fs.existsSync(commandsPath)) {
+  const commandFiles = fs.readdirSync(commandsPath).filter((file) => file.endsWith('.js'));
+
+  for (const file of commandFiles) {
+    const filePath = path.join(commandsPath, file);
+    const command = require(filePath);
+
+    if (command?.data && command?.execute) {
+      client.commands.set(command.data.name, command);
+    } else {
+      console.warn(`Skipping invalid command file: ${file}`);
+    }
+  }
+}
+
+client.once('ready', () => {
+  console.log(`Logged in as ${client.user.tag}`);
+});
+
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  const command = client.commands.get(interaction.commandName);
+  if (!command) return;
+
+  try {
+    await command.execute(interaction, client);
+  } catch (error) {
+    console.error(`Error executing command ${interaction.commandName}:`, error);
+
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({
+        content: 'There was an error while executing this command.',
+        ephemeral: true,
+      });
+    } else {
+      await interaction.reply({
+        content: 'There was an error while executing this command.',
+        ephemeral: true,
+      });
+    }
+  }
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled promise rejection:', error);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+});
+
+client.login(process.env.DISCORD_TOKEN).catch((error) => {
+  console.error('Failed to log in:', error);
+  process.exit(1);
+});
