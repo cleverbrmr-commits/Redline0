@@ -46,8 +46,7 @@ function loadCommandModules(commandsPath) {
       if (!mod || !Array.isArray(mod.commands)) {
         throw new Error(`Invalid command module: ${file}`);
       }
-      console.log(`[startup] loaded command module ${file} (${mod.commands.length} commands)`);
-      console.log(`[startup] module ${file} commands: ${mod.commands.map((command) => command?.name || '<invalid>').join(', ')}`);
+      console.log(`Loaded command module: ${file} (${mod.commands.length} commands)`);
       return mod;
     });
 }
@@ -76,9 +75,6 @@ function createDiscordClient() {
 function attachHandlers(client, commandRegistry) {
   client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry));
   client.on(Events.MessageCreate, createMessageHandler(client, commandRegistry, PREFIX_NAME));
-  console.log(`[startup] attached interaction handler (${client.listenerCount(Events.InteractionCreate)} listener total)`);
-  console.log(`[startup] attached message handler (${client.listenerCount(Events.MessageCreate)} listener total)`);
-  console.log(`[startup] prefix parser active for ${PREFIX_NAME}`);
 }
 
 function startBackgroundJobs(client) {
@@ -99,13 +95,12 @@ async function bootstrap() {
 
   client.once(Events.ClientReady, async (readyClient) => {
     console.log(`Logged in as ${readyClient.user.tag}`);
-    console.log(`[startup] loaded ${commandRegistry.size} slash command definitions`);
-    console.log(`[startup] registration scope: guild ${process.env.GUILD_ID}`);
+    console.log(`Loaded ${commandRegistry.size} slash command(s).`);
+    console.log(`Prefix trigger: ${PREFIX_NAME}`);
 
-    const registeredCount = await registerCommands(commandRegistry);
-    console.log(`[startup] registered ${registeredCount} slash commands`);
+    await registerCommands(commandRegistry);
     startBackgroundJobs(client);
-    console.log('[startup] background jobs started');
+    console.log('Slash commands registered successfully.');
   });
 
   process.on('unhandledRejection', (error) => console.error('Unhandled promise rejection:', error));

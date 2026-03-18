@@ -3,26 +3,14 @@ const { handleButton, handleStringSelect } = require('../services/panelService')
 const { makeWarningEmbed } = require('../utils/embeds');
 const { prettyError } = require('../utils/helpers');
 
-function validateCommandShape(command) {
-  if (!command?.name) {
-    throw new Error('Encountered a command without a name.');
-  }
-
-  if (!command.data || typeof command.data.toJSON !== 'function') {
-    throw new Error(`Command "${command.name}" is missing a valid SlashCommandBuilder.`);
-  }
-
-  if (typeof command.execute !== 'function') {
-    throw new Error(`Command "${command.name}" is missing an execute handler.`);
-  }
-}
-
 function buildCommandRegistry(commandModules) {
   const commands = commandModules.flatMap((entry) => entry.commands || []);
   const registry = new Map();
 
   for (const command of commands) {
-    validateCommandShape(command);
+    if (!command?.name) {
+      continue;
+    }
 
     if (registry.has(command.name)) {
       throw new Error(`Duplicate command definition detected for "${command.name}".`);
