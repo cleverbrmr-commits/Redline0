@@ -42,6 +42,17 @@ function brandEmoji() {
 }
 
 function prettyError(err) {
+  const errorName = String(err?.name || '');
+  const errorMessage = String(err?.message || '').trim();
+
+  if (errorName.includes('CombinedPropertyError') || errorName.includes('ExpectedConstraintError')) {
+    return 'A response payload could not be rendered correctly. Check the bot logs for the detailed validation error.';
+  }
+
+  if (errorMessage === 'Received one or more errors') {
+    return 'A response payload could not be rendered correctly. Check the bot logs for the detailed validation error.';
+  }
+
   if (Array.isArray(err?.errors) && err.errors.length) {
     const messages = err.errors
       .map((entry) => entry?.message || entry)

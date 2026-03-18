@@ -5,8 +5,11 @@ function makeEmbed({ title, description, color, fields, footer, author, thumbnai
   const embed = new EmbedBuilder()
     .setColor(color || brandColor())
     .setTitle(title)
-    .setDescription(description)
     .setFooter({ text: footer || BRAND.footer });
+
+  if (description !== undefined && description !== null && String(description).length) {
+    embed.setDescription(String(description));
+  }
 
   if (author) embed.setAuthor(typeof author === "string" ? { name: author } : author);
   if (thumbnail) embed.setThumbnail(thumbnail);
