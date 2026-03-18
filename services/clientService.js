@@ -1,11 +1,15 @@
-const { loadModulesRaw, saveModulesRaw } = require("../storage/clientsStore");
+const fsp = require("fs/promises");
+const path = require("path");
+const { UPLOADS_DIR, ensureClientsStore, loadModulesRaw, saveModulesRaw } = require("../storage/clientsStore");
 const {
   CATEGORY_OPTIONS,
   formatRoleMention,
+  getStoredFileNameForKey,
   normalizeCategory,
   normalizeStatus,
   normalizeVisibility,
   parseRoleId,
+  resolveModulePath,
   slugify,
   trimText,
 } = require("../utils/helpers");
@@ -13,8 +17,7 @@ const { isVisibleToMember } = require("../utils/permissions");
 
 function normalizeModuleRecord(key, value) {
   const originalName = value.originalName || value.label || `${key}.jar`;
-  const ext = require("path").extname(originalName) || require("path").extname(value.storedFileName || "") || ".jar";
-  const storedFileName = value.storedFileName || `${key}${ext}`;
+  const storedFileName = getStoredFileNameForKey(key, value.storedFileName || originalName);
 
   return {
     label: value.label || key,
@@ -34,6 +37,8 @@ function normalizeModuleRecord(key, value) {
 }
 
 async function loadModules() {
+  await ensureClientsStore();
+
   const rawModules = await loadModulesRaw();
   const normalized = {};
 
@@ -45,6 +50,7 @@ async function loadModules() {
 }
 
 async function saveModules(modules) {
+  await ensureClientsStore();
   await saveModulesRaw(modules);
 }
 
@@ -94,7 +100,29 @@ function getClientAutocompleteChoices(modules, focused) {
     .slice(0, 25);
 }
 
+async function removeStoredClientFile(mod) {
+  const existingPath = resolveModulePath(mod, UPLOADS_DIR);
+  if (!existingPath) return;
+
+  await fsp.rm(existingPath, { force: true }).catch(() => null);
+}
+
 async function downloadFile(url, destinationPath) {
+  await ensureClientsStore();
+
+  if (!destinationPath) {
+    throw new Error("Upload destination is invalid.");
+  }
+
+  const absoluteDestination = path.resolve(destinationPath);
+  const uploadsRoot = path.resolve(UPLOADS_DIR);
+
+  if (!absoluteDestination.startsWith(`${uploadsRoot}${path.sep}`)) {
+    throw new Error("Upload destination escapes the uploads directory.");
+  }
+
+  await fsp.mkdir(path.dirname(absoluteDestination), { recursive: true });
+
   const res = await fetch(url);
 
   if (!res.ok) {
@@ -102,7 +130,10 @@ async function downloadFile(url, destinationPath) {
   }
 
   const buffer = Buffer.from(await res.arrayBuffer());
-  await require("fs/promises").writeFile(destinationPath, buffer);
+  const tempPath = `${absoluteDestination}.part`;
+
+  await fsp.writeFile(tempPath, buffer);
+  await fsp.rename(tempPath, absoluteDestination);
 }
 
 module.exports = {
@@ -114,5 +145,6 @@ module.exports = {
   getVisibleClientEntries,
   loadModules,
   normalizeModuleRecord,
+  removeStoredClientFile,
   saveModules,
 };
