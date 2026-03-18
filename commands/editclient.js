@@ -21,6 +21,15 @@ module.exports = {
   commands: [
     {
       name: "editclient",
+      metadata: {
+        category: "client/content management",
+        description: "Edit stored client metadata without re-uploading the file.",
+        usage: ["/editclient name:<client> ..."],
+        prefixEnabled: false,
+        examples: ["/editclient name:alpha new_name:Alpha Lite status:Stable"],
+        permissions: ["Manage Guild"],
+        response: "ephemeral",
+      },
       data: new SlashCommandBuilder()
         .setName("editclient")
         .setDescription("Edit client metadata without re-uploading")

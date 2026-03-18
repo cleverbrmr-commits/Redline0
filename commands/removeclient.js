@@ -9,6 +9,15 @@ module.exports = {
   commands: [
     {
       name: "removeclient",
+      metadata: {
+        category: "client/content management",
+        description: "Remove a client entry and its stored file.",
+        usage: ["/removeclient name:<client>"],
+        prefixEnabled: false,
+        examples: ["/removeclient name:alpha"],
+        permissions: ["Manage Guild"],
+        response: "ephemeral",
+      },
       data: new SlashCommandBuilder()
         .setName("removeclient")
         .setDescription("Remove a client and delete its stored file")
