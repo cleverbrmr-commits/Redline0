@@ -30,7 +30,7 @@ const commandRegistry = buildCommandRegistry([
   moderationCommand,
 ]);
 
-async function bootstrapReady() {
+async function handleReady() {
   try {
     validateEnv();
     await ensureClientsStore();
@@ -44,7 +44,7 @@ async function bootstrapReady() {
   }
 }
 
-client.once(Events.ClientReady, bootstrapReady);
+client.once(Events.ClientReady, handleReady);
 client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry));
 
 client.login(process.env.DISCORD_TOKEN);
