@@ -2,7 +2,6 @@ const { makeEmbed } = require('../utils/embeds');
 const { trimText } = require('../utils/helpers');
 
 const CATEGORY_ORDER = ['moderation', 'utility', 'admin', 'youtube', 'client/content management', 'misc'];
-const MAX_FIELD_VALUE_LENGTH = 1024;
 
 function normalizeCategory(category) {
   return String(category || 'misc').trim().toLowerCase();
@@ -54,37 +53,12 @@ function buildHelpOverviewEmbed(commandRegistry) {
 
   const fields = CATEGORY_ORDER
     .filter((category) => byCategory.has(category))
-    .flatMap((category) => {
-      const title = category.replace(/\b\w/g, (char) => char.toUpperCase());
-      const lines = byCategory.get(category)
-        .map((command) => `• **/${command.name}** — ${trimText(command.description, 90)}\n  Usage: ${trimText(command.usage[0], 90)}`);
-      const chunks = [];
-      let current = '';
-
-      for (const line of lines) {
-        const nextValue = current ? `${current}\n${line}` : line;
-        if (nextValue.length > MAX_FIELD_VALUE_LENGTH) {
-          if (current) {
-            chunks.push(current);
-            current = line;
-          } else {
-            chunks.push(trimText(line, MAX_FIELD_VALUE_LENGTH));
-            current = '';
-          }
-        } else {
-          current = nextValue;
-        }
-      }
-
-      if (current) {
-        chunks.push(current);
-      }
-
-      return chunks.map((value, index) => ({
-        name: index === 0 ? title : `${title} (cont.)`,
-        value,
-      }));
-    });
+    .map((category) => ({
+      name: category.replace(/\b\w/g, (char) => char.toUpperCase()),
+      value: byCategory.get(category)
+        .map((command) => `• **/${command.name}** — ${trimText(command.description, 90)}\n  Usage: ${trimText(command.usage[0], 90)}`)
+        .join('\n'),
+    }));
 
   return makeEmbed({
     title: 'Help Center',

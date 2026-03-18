@@ -128,8 +128,8 @@ const commands = [
     },
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.KickMembers, 'You need Kick Members to use this command.');
-      const target = await resolveMemberFromToken(message.guild, args[0], message.member);
-      if (!target) return message.reply({ content: 'Usage: `Serenity kick @user|me <reason>`' });
+      const target = await resolveMemberFromToken(message.guild, args[0]);
+      if (!target) return message.reply({ content: 'Usage: `Serenity kick @user <reason>`' });
       const botMember = await message.guild.members.fetchMe();
       const targetError = assertTargetRules({ actorMember: message.member, botMember, targetMember: target });
       if (targetError) return message.reply({ embeds: [makeWarningEmbed({ title: 'Kick denied', description: targetError })] });

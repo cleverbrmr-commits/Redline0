@@ -3,26 +3,14 @@ const { handleButton, handleStringSelect } = require('../services/panelService')
 const { makeWarningEmbed } = require('../utils/embeds');
 const { prettyError } = require('../utils/helpers');
 
-function validateCommandShape(command) {
-  if (!command?.name) {
-    throw new Error('Encountered a command without a name.');
-  }
-
-  if (!command.data || typeof command.data.toJSON !== 'function') {
-    throw new Error(`Command "${command.name}" is missing a valid SlashCommandBuilder.`);
-  }
-
-  if (typeof command.execute !== 'function') {
-    throw new Error(`Command "${command.name}" is missing an execute handler.`);
-  }
-}
-
 function buildCommandRegistry(commandModules) {
   const commands = commandModules.flatMap((entry) => entry.commands || []);
   const registry = new Map();
 
   for (const command of commands) {
-    validateCommandShape(command);
+    if (!command?.name) {
+      continue;
+    }
 
     if (registry.has(command.name)) {
       throw new Error(`Duplicate command definition detected for "${command.name}".`);
@@ -80,7 +68,6 @@ function createInteractionHandler(client, commandRegistry) {
 
       if (interaction.isChatInputCommand()) {
         const command = commandRegistry.get(interaction.commandName);
-        console.log(`[runtime] slash command invoked: ${interaction.commandName}`);
         if (!command) {
           console.error(`[interaction] received unknown slash command "${interaction.commandName}"`);
           await interaction.reply({
@@ -96,13 +83,8 @@ function createInteractionHandler(client, commandRegistry) {
         }
 
         await command.execute({ client, interaction, commandRegistry });
-        const acknowledged = await ensureInteractionAcknowledged(interaction, `slash command "${interaction.commandName}"`);
-        if (acknowledged) {
-          console.log(`[runtime] command succeeded: ${interaction.commandName}`);
-        } else {
-          console.error(`[runtime] command failed: ${interaction.commandName} with real error: interaction was not acknowledged`);
-        }
-        return acknowledged;
+        await ensureInteractionAcknowledged(interaction, `slash command "${interaction.commandName}"`);
+        return true;
       }
 
       if (interaction.isStringSelectMenu()) {
@@ -147,8 +129,7 @@ function createInteractionHandler(client, commandRegistry) {
 
       return false;
     } catch (err) {
-      const commandLabel = interaction.commandName || interaction.customId || 'unknown-interaction';
-      console.error(`[runtime] command failed: ${commandLabel} with real error:`, err);
+      console.error('Interaction error:', err);
 
       const embed = makeWarningEmbed({ title: 'Operation failed', description: prettyError(err) });
 

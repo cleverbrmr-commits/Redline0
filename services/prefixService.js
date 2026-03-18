@@ -36,12 +36,7 @@ function extractSnowflake(value) {
   return match ? match[0] : null;
 }
 
-async function resolveMemberFromToken(guild, token, fallbackMember = null) {
-  const normalized = String(token || '').trim().toLowerCase();
-  if (fallbackMember && ['me', 'self', '@me'].includes(normalized)) {
-    return fallbackMember;
-  }
-
+async function resolveMemberFromToken(guild, token) {
   const id = extractSnowflake(token);
   if (!guild || !id) return null;
   return guild.members.fetch(id).catch(() => null);

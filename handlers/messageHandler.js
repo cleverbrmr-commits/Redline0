@@ -1,6 +1,5 @@
 const { makeWarningEmbed } = require('../utils/embeds');
 const { parsePrefixInvocation } = require('../services/prefixService');
-const { prettyError } = require('../utils/helpers');
 
 function createMessageHandler(client, commandRegistry, prefixName) {
   return async function onMessage(message) {
@@ -13,19 +12,8 @@ function createMessageHandler(client, commandRegistry, prefixName) {
       return false;
     }
 
-    console.log(`[runtime] prefix command invoked: ${invocation.commandName}`);
-
     const command = commandRegistry.get(invocation.commandName);
     if (!command?.executePrefix) {
-      console.error(`[runtime] command failed: ${invocation.commandName} with real error: no prefix handler`);
-      await message.reply({
-        embeds: [
-          makeWarningEmbed({
-            title: 'Command unavailable',
-            description: `The prefix command \`${invocation.commandName}\` is not loaded or does not support prefix usage.`,
-          }),
-        ],
-      }).catch(() => null);
       return false;
     }
 
@@ -37,11 +25,10 @@ function createMessageHandler(client, commandRegistry, prefixName) {
         commandRegistry,
         prefixName,
       });
-      console.log(`[runtime] command succeeded: ${invocation.commandName}`);
       return true;
     } catch (error) {
-      console.error(`[runtime] command failed: ${invocation.commandName} with real error:`, error);
-      await message.reply({ embeds: [makeWarningEmbed({ title: 'Command failed', description: prettyError(error) })] }).catch(() => null);
+      console.error('Prefix command error:', error);
+      await message.reply({ embeds: [makeWarningEmbed({ title: 'Command failed', description: error?.message || 'Something went wrong.' })] }).catch(() => null);
       return false;
     }
   };
