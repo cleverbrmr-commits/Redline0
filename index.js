@@ -1,17 +1,58 @@
 require('dotenv').config();
 
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const { Client, Collection, GatewayIntentBits } = require('discord.js');
+const {
+  Events,
+  buildCommandRegistry,
+  createInteractionHandler,
+  registerCommands,
+} = require('./handlers/interactionHandler');
 
 function validateEnv() {
-  const required = ['DISCORD_TOKEN', 'CLIENT_ID'];
+  const required = ['DISCORD_TOKEN', 'CLIENT_ID', 'GUILD_ID'];
   const missing = required.filter((key) => !process.env[key]);
 
   if (missing.length) {
     console.error(`Missing required environment variables: ${missing.join(', ')}`);
     process.exit(1);
   }
+}
+
+function loadCommandModules(commandsPath) {
+  if (!fs.existsSync(commandsPath)) {
+    console.warn(`Commands path not found: ${commandsPath}`);
+    return [];
+  }
+
+  const files = fs
+    .readdirSync(commandsPath)
+    .filter((file) => file.endsWith('.js'))
+    .sort();
+
+  const modules = [];
+
+  for (const file of files) {
+    const filePath = path.join(commandsPath, file);
+
+    try {
+      delete require.cache[require.resolve(filePath)];
+      const mod = require(filePath);
+
+      if (!mod || !Array.isArray(mod.commands)) {
+        console.warn(`Skipping invalid command module: ${file}`);
+        continue;
+      }
+
+      modules.push(mod);
+      console.log(`Loaded command module: ${file} (${mod.commands.length} commands)`);
+    } catch (error) {
+      console.error(`Failed to load command module ${file}:`, error);
+    }
+  }
+
+  return modules;
 }
 
 validateEnv();
@@ -25,52 +66,26 @@ const client = new Client({
   ],
 });
 
-client.commands = new Collection();
+const commandModules = loadCommandModules(path.join(__dirname, 'commands'));
+const commandRegistry = buildCommandRegistry(commandModules);
 
-const commandsPath = path.join(__dirname, 'commands');
-if (fs.existsSync(commandsPath)) {
-  const commandFiles = fs.readdirSync(commandsPath).filter((file) => file.endsWith('.js'));
+client.commands = new Collection(
+  [...commandRegistry.entries()].map(([name, command]) => [name, command])
+);
 
-  for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const command = require(filePath);
-
-    if (command?.data && command?.execute) {
-      client.commands.set(command.data.name, command);
-    } else {
-      console.warn(`Skipping invalid command file: ${file}`);
-    }
-  }
-}
-
-client.once('ready', () => {
-  console.log(`Logged in as ${client.user.tag}`);
-});
-
-client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-
-  const command = client.commands.get(interaction.commandName);
-  if (!command) return;
+client.once(Events.ClientReady, async (readyClient) => {
+  console.log(`Logged in as ${readyClient.user.tag}`);
+  console.log(`Loaded ${commandRegistry.size} slash command(s).`);
 
   try {
-    await command.execute(interaction, client);
+    await registerCommands(commandRegistry);
+    console.log('Slash commands registered successfully.');
   } catch (error) {
-    console.error(`Error executing command ${interaction.commandName}:`, error);
-
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({
-        content: 'There was an error while executing this command.',
-        ephemeral: true,
-      });
-    } else {
-      await interaction.reply({
-        content: 'There was an error while executing this command.',
-        ephemeral: true,
-      });
-    }
+    console.error('Failed to register slash commands:', error);
   }
 });
+
+client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry));
 
 process.on('unhandledRejection', (error) => {
   console.error('Unhandled promise rejection:', error);
