@@ -1,25 +1,19 @@
 require("dotenv").config();
 
-const fs = require("fs");
-const fsp = require("fs/promises");
-const path = require("path");
-
-const {
-  Client,
-  GatewayIntentBits,
-  Events,
-  REST,
-  Routes,
-  SlashCommandBuilder,
-  PermissionFlagsBits,
-  ActionRowBuilder,
-  StringSelectMenuBuilder,
-  StringSelectMenuOptionBuilder,
-  EmbedBuilder,
-  AttachmentBuilder,
-  ChannelType,
-  Colors,
-} = require("discord.js");
+const { Client, Events, GatewayIntentBits } = require("discord.js");
+const clientsCommand = require("./commands/clients");
+const clientpanelCommand = require("./commands/clientpanel");
+const uploadCommand = require("./commands/upload");
+const editclientCommand = require("./commands/editclient");
+const removeclientCommand = require("./commands/removeclient");
+const setCommand = require("./commands/set");
+const embedCommand = require("./commands/embed");
+const moderationCommand = require("./commands/moderation");
+const { buildCommandRegistry, createInteractionHandler, registerCommands } = require("./handlers/interactionHandler");
+const { ensureClientsStore } = require("./storage/clientsStore");
+const { ensureEmbedsStore } = require("./storage/embedsStore");
+const { ensureConfigStorage } = require("./services/configService");
+const { validateEnv } = require("./utils/helpers");
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
@@ -586,161 +580,15 @@ async function registerCommands() {
   const commands = [
     new SlashCommandBuilder().setName("clients").setDescription("Open the private client panel"),
 
-    new SlashCommandBuilder()
-      .setName("clientpanel")
-      .setDescription("Client panel tools")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-      .addSubcommand((sub) =>
-        sub.setName("send").setDescription("Send the public client panel")
-      ),
-
-    new SlashCommandBuilder()
-      .setName("upload")
-      .setDescription("Upload a client file and add it to /clients")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-      .addStringOption((o) => o.setName("name").setDescription("Client name").setRequired(true))
-      .addAttachmentOption((o) => o.setName("file").setDescription("Client file").setRequired(true))
-      .addStringOption((o) => o.setName("description").setDescription("Short description"))
-      .addStringOption((o) =>
-        o.setName("category").setDescription("Client category").addChoices(...CATEGORY_OPTIONS.map((v) => ({ name: v, value: v })))
-      )
-      .addStringOption((o) =>
-        o.setName("visibility").setDescription("Who can see it").addChoices(
-          { name: "Public", value: "public" },
-          { name: "Hidden unless role matches", value: "hidden" }
-        )
-      )
-      .addRoleOption((o) => o.setName("accessrole").setDescription("Role required to access this client"))
-      .addStringOption((o) => o.setName("version").setDescription("Version label, e.g. v2.4.0"))
-      .addStringOption((o) => o.setName("loader").setDescription("Loader, e.g. Fabric"))
-      .addStringOption((o) => o.setName("mc_version").setDescription("Minecraft version"))
-      .addStringOption((o) =>
-        o.setName("status").setDescription("Release state").addChoices(...STATUS_OPTIONS.map((v) => ({ name: v, value: v })))
-      )
-      .addStringOption((o) => o.setName("changelog").setDescription("Short changelog snippet")),
-
-    new SlashCommandBuilder()
-      .setName("removeclient")
-      .setDescription("Remove a client and delete its stored file")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-      .addStringOption((o) => o.setName("name").setDescription("Client name or key").setRequired(true)),
-
-    new SlashCommandBuilder()
-      .setName("editclient")
-      .setDescription("Edit client metadata without re-uploading")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-      .addStringOption((o) => o.setName("name").setDescription("Existing client name or key").setRequired(true))
-      .addStringOption((o) => o.setName("new_name").setDescription("New display name"))
-      .addStringOption((o) => o.setName("description").setDescription("New description"))
-      .addStringOption((o) =>
-        o.setName("category").setDescription("New category").addChoices(...CATEGORY_OPTIONS.map((v) => ({ name: v, value: v })))
-      )
-      .addStringOption((o) =>
-        o.setName("visibility").setDescription("Public or hidden").addChoices(
-          { name: "Public", value: "public" },
-          { name: "Hidden unless role matches", value: "hidden" }
-        )
-      )
-      .addRoleOption((o) => o.setName("accessrole").setDescription("New access role"))
-      .addBooleanOption((o) => o.setName("clear_accessrole").setDescription("Remove any role lock"))
-      .addStringOption((o) => o.setName("version").setDescription("Version label"))
-      .addStringOption((o) => o.setName("loader").setDescription("Loader name"))
-      .addStringOption((o) => o.setName("mc_version").setDescription("Minecraft version"))
-      .addStringOption((o) =>
-        o.setName("status").setDescription("Release state").addChoices(...STATUS_OPTIONS.map((v) => ({ name: v, value: v })))
-      )
-      .addStringOption((o) => o.setName("changelog").setDescription("Changelog snippet")),
-
-    new SlashCommandBuilder()
-      .setName("announceclient")
-      .setDescription("Post a polished announcement for an existing client")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-      .addStringOption((o) => o.setName("name").setDescription("Client name or key").setRequired(true))
-      .addStringOption((o) => o.setName("highlights").setDescription("Extra highlights for the release")),
-
-    new SlashCommandBuilder()
-      .setName("exportclients")
-      .setDescription("Export the current client metadata")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
-
-    new SlashCommandBuilder()
-      .setName("backup")
-      .setDescription("Create a JSON backup snapshot")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
-
-    new SlashCommandBuilder()
-      .setName("kick")
-      .setDescription("Kick a member from the server")
-      .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
-      .addUserOption((o) => o.setName("user").setDescription("Member to kick").setRequired(true))
-      .addStringOption((o) => o.setName("reason").setDescription("Why they are being kicked")),
-
-    new SlashCommandBuilder()
-      .setName("ban")
-      .setDescription("Ban a member from the server")
-      .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
-      .addUserOption((o) => o.setName("user").setDescription("Member to ban").setRequired(true))
-      .addStringOption((o) => o.setName("reason").setDescription("Why they are being banned"))
-      .addIntegerOption((o) =>
-        o.setName("delete_days").setDescription("Delete up to 7 days of message history").setMinValue(0).setMaxValue(7)
-      ),
-
-    new SlashCommandBuilder()
-      .setName("prison")
-      .setDescription("Lock a member from sending messages until released")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-      .addUserOption((o) => o.setName("user").setDescription("Member to imprison").setRequired(true))
-      .addStringOption((o) => o.setName("reason").setDescription("Why they were imprisoned")),
-
-    new SlashCommandBuilder()
-      .setName("unprison")
-      .setDescription("Release a member from prison")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-      .addUserOption((o) => o.setName("user").setDescription("Member to release").setRequired(true))
-      .addStringOption((o) => o.setName("note").setDescription("Optional release note")),
-
-    new SlashCommandBuilder()
-      .setName("prisonlist")
-      .setDescription("Show currently imprisoned members")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
-
-    new SlashCommandBuilder()
-      .setName("prisonreason")
-      .setDescription("Show the stored prison reason for a user")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-      .addUserOption((o) => o.setName("user").setDescription("Member to inspect").setRequired(true)),
-
-    new SlashCommandBuilder()
-      .setName("announce")
-      .setDescription("Send a styled announcement and ping everyone")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-      .addStringOption((o) => o.setName("title").setDescription("Announcement title").setRequired(true))
-      .addStringOption((o) => o.setName("message").setDescription("Announcement body").setRequired(true)),
-  ].map((c) => c.toJSON());
-
-  const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
-
-  await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), {
-    body: commands,
-  });
-}
-
-function findClientKey(modules, query) {
-  const raw = String(query || "").trim();
-  if (!raw) return null;
-
-  const directKey = slugify(raw);
-  if (modules[directKey]) return directKey;
-
-  const found = Object.entries(modules).find(([, mod]) => String(mod.label).toLowerCase() === raw.toLowerCase());
-  return found ? found[0] : null;
-}
+const commandRegistry = buildCommandRegistry(commandModules);
 
 client.once(Events.ClientReady, async () => {
   try {
     validateEnv();
-    await ensureStorage();
-    await registerCommands();
+    await ensureClientsStore();
+    await ensureConfigStorage();
+    await ensureEmbedsStore();
+    await registerCommands(commandRegistry);
     console.log(`Logged in as ${client.user.tag}`);
     console.log("Bot ready");
   } catch (err) {
