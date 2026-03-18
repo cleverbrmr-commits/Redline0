@@ -1,3 +1,4 @@
+// force redeploy v2
 require("dotenv").config();
 
 const { Client, Events, GatewayIntentBits } = require("discord.js");
