@@ -6,24 +6,35 @@ const PRISON_FILE = path.join(__dirname, "..", "prison-state.json");
 const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
 const BACKUPS_DIR = path.join(__dirname, "..", "backups");
 
-async function ensureClientsStore() {
-  await fsp.mkdir(UPLOADS_DIR, { recursive: true });
-  await fsp.mkdir(BACKUPS_DIR, { recursive: true });
+let ensurePromise = null;
 
+async function ensureFile(filePath, fallbackContents = "{}") {
   try {
-    await fsp.access(DATA_FILE);
+    await fsp.access(filePath);
   } catch {
-    await fsp.writeFile(DATA_FILE, "{}", "utf8");
-  }
-
-  try {
-    await fsp.access(PRISON_FILE);
-  } catch {
-    await fsp.writeFile(PRISON_FILE, "{}", "utf8");
+    await fsp.writeFile(filePath, fallbackContents, "utf8");
   }
 }
 
+async function ensureClientsStore() {
+  if (!ensurePromise) {
+    ensurePromise = (async () => {
+      await fsp.mkdir(UPLOADS_DIR, { recursive: true });
+      await fsp.mkdir(BACKUPS_DIR, { recursive: true });
+      await ensureFile(DATA_FILE, "{}");
+      await ensureFile(PRISON_FILE, "{}");
+    })().catch((error) => {
+      ensurePromise = null;
+      throw error;
+    });
+  }
+
+  return ensurePromise;
+}
+
 async function loadJson(filePath, fallback = {}) {
+  await ensureClientsStore();
+
   try {
     const raw = await fsp.readFile(filePath, "utf8");
     return JSON.parse(raw || JSON.stringify(fallback));
@@ -33,7 +44,11 @@ async function loadJson(filePath, fallback = {}) {
 }
 
 async function writeJson(filePath, value) {
-  await fsp.writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
+  await ensureClientsStore();
+
+  const tempPath = `${filePath}.tmp`;
+  await fsp.writeFile(tempPath, JSON.stringify(value, null, 2), "utf8");
+  await fsp.rename(tempPath, filePath);
 }
 
 async function loadModulesRaw() {

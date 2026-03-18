@@ -1,7 +1,7 @@
 const path = require("path");
 const { PermissionFlagsBits, SlashCommandBuilder } = require("discord.js");
 const { UPLOADS_DIR } = require("../storage/clientsStore");
-const { downloadFile, loadModules, normalizeModuleRecord, saveModules } = require("../services/clientService");
+const { downloadFile, loadModules, normalizeModuleRecord, removeStoredClientFile, saveModules } = require("../services/clientService");
 const { makeSuccessEmbed, makeWarningEmbed } = require("../utils/embeds");
 const {
   CATEGORY_OPTIONS,
@@ -11,6 +11,7 @@ const {
   normalizeCategory,
   normalizeStatus,
   normalizeVisibility,
+  safeResolvePath,
   slugify,
   trimText,
   STATUS_OPTIONS,
@@ -60,29 +61,62 @@ module.exports = {
           return interaction.editReply({ embeds: [makeWarningEmbed({ title: "Upload blocked", description: "That client name becomes an invalid key." })] });
         }
 
-        const originalName = file.name || "client.jar";
-        const savedFileName = getStoredFileNameForKey(key, originalName);
-        const filePath = path.join(UPLOADS_DIR, savedFileName);
+        if (!file.url) {
+          return interaction.editReply({
+            embeds: [makeWarningEmbed({ title: "Upload blocked", description: "Discord did not provide a downloadable attachment URL. Please re-upload the file and try again." })],
+          });
+        }
 
-        await downloadFile(file.url, filePath);
+        if (visibility === "hidden" && !accessRole) {
+          return interaction.editReply({
+            embeds: [makeWarningEmbed({ title: "Upload blocked", description: "Hidden clients require an access role, otherwise nobody can see them in `/clients`." })],
+          });
+        }
+
+        const originalName = file.name || path.basename(new URL(file.url).pathname) || "client.jar";
+        const savedFileName = getStoredFileNameForKey(key, originalName);
+        const filePath = safeResolvePath(UPLOADS_DIR, savedFileName);
+
+        if (!filePath) {
+          return interaction.editReply({
+            embeds: [makeWarningEmbed({ title: "Upload blocked", description: "The uploaded filename could not be mapped into storage safely." })],
+          });
+        }
 
         const modules = await loadModules();
-        modules[key] = normalizeModuleRecord(key, {
-          label: name,
-          description,
-          storedFileName: savedFileName,
-          originalName,
-          uploadedAt: new Date().toISOString(),
-          category,
-          visibility,
-          accessRoleId: accessRole?.id || null,
-          version,
-          loader,
-          mcVersion,
-          status,
-          changelog,
-        });
-        await saveModules(modules);
+        const existingRecord = modules[key] || null;
+        const previousFileName = existingRecord?.storedFileName || null;
+
+        try {
+          await downloadFile(file.url, filePath);
+
+          modules[key] = normalizeModuleRecord(key, {
+            label: name,
+            description,
+            storedFileName: savedFileName,
+            originalName,
+            uploadedAt: new Date().toISOString(),
+            category,
+            visibility,
+            accessRoleId: accessRole?.id || null,
+            version,
+            loader,
+            mcVersion,
+            status,
+            changelog,
+          });
+          await saveModules(modules);
+        } catch (error) {
+          if (filePath) {
+            await require("fs/promises").rm(filePath, { force: true }).catch(() => null);
+            await require("fs/promises").rm(`${filePath}.part`, { force: true }).catch(() => null);
+          }
+          throw error;
+        }
+
+        if (existingRecord && previousFileName && previousFileName !== savedFileName) {
+          await removeStoredClientFile(existingRecord);
+        }
 
         return interaction.editReply({
           embeds: [
@@ -91,8 +125,11 @@ module.exports = {
               description: `**${name}** is now available in \`/clients\`.`,
               fields: [
                 { name: "File", value: trimText(originalName, 100), inline: true },
+                { name: "Version", value: trimText(version, 100), inline: true },
+                { name: "Status", value: status, inline: true },
                 { name: "Category", value: category, inline: true },
                 { name: "Access", value: formatRoleMention(accessRole?.id || null), inline: true },
+                { name: "Visibility", value: visibility === "hidden" ? "Hidden (role-gated)" : "Public", inline: true },
               ],
             }),
           ],
