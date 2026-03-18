@@ -8,6 +8,15 @@ module.exports = {
   commands: [
     {
       name: "say",
+      metadata: {
+        category: "admin",
+        description: "Send a message as the bot into a chosen channel.",
+        usage: ["/say message:<text> channel:#channel"],
+        prefixEnabled: false,
+        examples: ["/say message:Hello channel:#general"],
+        permissions: ["Manage Guild"],
+        response: "ephemeral",
+      },
       data: new SlashCommandBuilder()
         .setName("say")
         .setDescription("Send a message as the bot")

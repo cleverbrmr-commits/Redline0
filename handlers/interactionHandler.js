@@ -1,15 +1,29 @@
-const { Events, REST, Routes } = require("discord.js");
-const { handleButton, handleStringSelect } = require("../services/panelService");
-const { makeWarningEmbed } = require("../utils/embeds");
-const { prettyError } = require("../utils/helpers");
+const { Events, REST, Routes } = require('discord.js');
+const { handleButton, handleStringSelect } = require('../services/panelService');
+const { makeWarningEmbed } = require('../utils/embeds');
+const { prettyError } = require('../utils/helpers');
 
 function buildCommandRegistry(commandModules) {
   const commands = commandModules.flatMap((entry) => entry.commands || []);
-  return new Map(commands.map((command) => [command.name, command]));
+  const registry = new Map();
+
+  for (const command of commands) {
+    if (!command?.name) {
+      continue;
+    }
+
+    if (registry.has(command.name)) {
+      throw new Error(`Duplicate command definition detected for "${command.name}".`);
+    }
+
+    registry.set(command.name, command);
+  }
+
+  return registry;
 }
 
 async function registerCommands(commandRegistry) {
-  const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   const body = [...commandRegistry.values()].map((command) => command.data.toJSON());
 
   await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), {
@@ -47,9 +61,9 @@ function createInteractionHandler(client, commandRegistry) {
 
       return false;
     } catch (err) {
-      console.error("Interaction error:", err);
+      console.error('Interaction error:', err);
 
-      const embed = makeWarningEmbed({ title: "Operation failed", description: prettyError(err) });
+      const embed = makeWarningEmbed({ title: 'Operation failed', description: prettyError(err) });
 
       if (interaction.deferred) {
         try {

@@ -21,6 +21,15 @@ module.exports = {
   commands: [
     {
       name: "upload",
+      metadata: {
+        category: "client/content management",
+        description: "Upload a client file and publish it to the client browser.",
+        usage: ["/upload name:<name> file:<attachment> ..."],
+        prefixEnabled: false,
+        examples: ["/upload name:Alpha file:<jar> category:Utility"],
+        permissions: ["Manage Guild"],
+        response: "ephemeral",
+      },
       data: new SlashCommandBuilder()
         .setName("upload")
         .setDescription("Upload a client file and add it to /clients")
