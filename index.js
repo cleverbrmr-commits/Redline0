@@ -10,7 +10,8 @@ const {
   registerCommands,
 } = require('./handlers/interactionHandler');
 const { createMessageHandler } = require('./handlers/messageHandler');
-const { createGuildMemberAddHandler } = require('./handlers/guildMemberHandler');
+const { createGuildMemberAddHandler, createGuildMemberRemoveHandler } = require('./handlers/guildMemberHandler');
+const { logMessageDelete, logMessageEdit } = require('./services/logService');
 const { ensureClientsStore } = require('./storage/clientsStore');
 const { ensureConfigStorage } = require('./services/configService');
 const { ensureModerationStore } = require('./storage/moderationStore');
@@ -78,6 +79,9 @@ function attachHandlers(client, commandRegistry) {
   client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry, PREFIX_NAME));
   client.on(Events.MessageCreate, createMessageHandler(client, commandRegistry, PREFIX_NAME));
   client.on(Events.GuildMemberAdd, createGuildMemberAddHandler(client));
+  client.on(Events.GuildMemberRemove, createGuildMemberRemoveHandler(client));
+  client.on(Events.MessageDelete, (message) => logMessageDelete(client, message).catch((error) => console.error('messageDelete log failed:', error)));
+  client.on(Events.MessageUpdate, (before, after) => logMessageEdit(client, before, after).catch((error) => console.error('messageUpdate log failed:', error)));
 }
 
 function startBackgroundJobs(client) {
