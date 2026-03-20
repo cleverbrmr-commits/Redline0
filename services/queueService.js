@@ -1,10 +1,4 @@
-const {
-  createAudioPlayer,
-  NoSubscriberBehavior,
-  AudioPlayerStatus,
-  VoiceConnectionStatus,
-  entersState,
-} = require('@discordjs/voice');
+const { createAudioPlayer, NoSubscriberBehavior, AudioPlayerStatus, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 
 const DEFAULT_VOLUME = 80;
 const MAX_VOLUME = 200;
@@ -31,7 +25,6 @@ function createGuildQueue({ guildId, textChannelId = null, voiceChannelId = null
 
   const queue = {
     guildId,
-    guildName: null,
     textChannelId,
     voiceChannelId,
     connection: null,
@@ -42,8 +35,6 @@ function createGuildQueue({ guildId, textChannelId = null, voiceChannelId = null
     volume: DEFAULT_VOLUME,
     nowPlayingStartedAt: null,
     destroyed: false,
-    lifecycleBound: false,
-    lastPlaybackError: null,
   };
 
   guildQueues.set(guildId, queue);
@@ -71,38 +62,26 @@ function setQueueConnection(queue, connection) {
   }
 }
 
-function annotateTrack(track, position) {
+function attachTrack(queue, track) {
   return {
     ...track,
-    queuePositionHint: position,
+    queuePositionHint: queue.currentTrack ? queue.tracks.length + 2 : queue.tracks.length + 1,
   };
 }
 
-function reindexQueue(queue) {
-  queue.tracks = queue.tracks.map((track, index) => annotateTrack(track, (queue.currentTrack ? 2 : 1) + index));
-  return queue.tracks;
-}
-
 function enqueueTracks(queue, tracks) {
-  queue.tracks.push(...tracks.map((track) => ({ ...track })));
-  reindexQueue(queue);
-  return queue.tracks.slice(-tracks.length);
+  const normalized = tracks.map((track) => attachTrack(queue, track));
+  queue.tracks.push(...normalized);
+  return normalized;
 }
 
-function peekNextTrack(queue) {
-  return queue.tracks[0] || null;
-}
-
-function shiftNextTrack(queue) {
-  const next = queue.tracks.shift() || null;
-  reindexQueue(queue);
-  return next;
+function dequeueNextTrack(queue) {
+  return queue.tracks.shift() || null;
 }
 
 function setCurrentTrack(queue, track) {
   queue.currentTrack = track || null;
   queue.nowPlayingStartedAt = track ? Date.now() : null;
-  reindexQueue(queue);
 }
 
 function getQueueSize(queue) {
@@ -121,9 +100,7 @@ function removeTrack(queue, position) {
     return null;
   }
 
-  const removed = queue.tracks.splice(index, 1)[0] || null;
-  reindexQueue(queue);
-  return removed;
+  return queue.tracks.splice(index, 1)[0] || null;
 }
 
 function shuffleQueue(queue) {
@@ -132,7 +109,6 @@ function shuffleQueue(queue) {
     [queue.tracks[index], queue.tracks[swapIndex]] = [queue.tracks[swapIndex], queue.tracks[index]];
   }
 
-  reindexQueue(queue);
   return queue.tracks;
 }
 
@@ -180,20 +156,18 @@ module.exports = {
   clearUpcoming,
   clampVolume,
   createGuildQueue,
+  dequeueNextTrack,
   destroyQueue,
   enqueueTracks,
   getAllGuildQueues,
   getGuildQueue,
   getOrCreateGuildQueue,
   getQueueSize,
-  peekNextTrack,
   removeTrack,
-  reindexQueue,
   setCurrentTrack,
   setLoopMode,
   setQueueConnection,
   setQueueVolume,
-  shiftNextTrack,
   shuffleQueue,
   waitForConnectionReady,
 };
