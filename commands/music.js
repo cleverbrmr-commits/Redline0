@@ -64,7 +64,7 @@ function buildCommand({
       response: 'public',
       restrictions: [
         'Most control commands require the user to be in the same voice channel as Serenity.',
-        'Spotify support is best-effort and depends on configured API credentials.',
+        'Spotify links are metadata-only and require Lavalink/extractor support to resolve into a playable source.',
       ],
     },
     data,
@@ -83,7 +83,7 @@ module.exports = {
   commands: [
     buildCommand({
       name: 'play',
-      description: 'Join your voice channel and play a track, playlist, or search result.',
+      description: 'Join your voice channel and play a track, playlist, or supported search result through Serenity\'s Lavalink-backed player.',
       usage: ['/play query_or_url:<text>'],
       examples: ['/play query_or_url:deadmau5 strobe', '/play query_or_url:https://youtu.be/dQw4w9WgXcQ', 'Serenity play lofi hip hop', 'Serenity play https://open.spotify.com/track/...'],
       data: new SlashCommandBuilder()
@@ -204,7 +204,7 @@ module.exports = {
     }),
     buildCommand({
       name: 'volume',
-      description: 'Set playback volume from 0 to 200%.',
+      description: 'Set playback volume from 0 to 200% on the active Lavalink player.',
       usage: ['/volume value:<0-200>'],
       examples: ['/volume value:80', 'Serenity volume 120'],
       data: new SlashCommandBuilder()

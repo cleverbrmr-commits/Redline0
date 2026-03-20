@@ -32,7 +32,7 @@ function createMessageHandler(client, commandRegistry, prefixName) {
       await message.reply({
         embeds: [
           makeWarningEmbed({
-            title: 'Command failed',
+            title: 'Prefix command could not be completed',
             description: prettyError(error),
           }),
         ],

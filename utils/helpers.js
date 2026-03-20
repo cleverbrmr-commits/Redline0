@@ -73,6 +73,14 @@ function normalizeErrorMessage(message) {
     return 'Discord blocked that delivery target.';
   }
 
+  if (value.includes("Cannot find module 'riffy'") || value.includes('Cannot find module "riffy"')) {
+    return 'Music playback dependency missing. Install the `riffy` package, configure Lavalink, and restart the bot.';
+  }
+
+  if (value.includes('Lavalink')) {
+    return trimText(value, 500);
+  }
+
   return trimText(value, 500);
 }
 
