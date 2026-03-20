@@ -119,7 +119,7 @@ utils/
 The old broken `play-dl` + `@discordjs/voice` music path has been replaced with a modular Lavalink-backed system built around the same core flow used by the provided `Unknownzop/MusicBot` source:
 
 - Riffy/Lavalink connection bootstrap and voice state forwarding.
-- `riffy.resolve(...)` for search, URL resolution, playlist loading, and provider routing, now with Serenity-side query normalization and source-aware fallbacks.
+- `riffy.resolve(...)` for search, URL resolution, playlist loading, and provider routing.
 - queue-driven playback through a persistent guild player.
 - Lavalink node lifecycle logging and queue-end cleanup.
 - the upstream Riffy node-property patch workaround adapted into Serenity’s service layer.
@@ -140,9 +140,9 @@ The imported foundation was refactored into Serenity’s architecture instead of
 Support depends on your Lavalink server and installed extractors/plugins, but this subsystem is designed to handle the same practical input classes as the provided source bot:
 
 - YouTube links and searches
-- YouTube Music searches via the default `ytmsearch` platform, with `music.youtube.com` URLs normalized to standard YouTube URLs before resolution
+- YouTube Music searches via the default `ytmsearch` platform
 - SoundCloud links/searches when your Lavalink stack supports them
-- Spotify links as **metadata-only** inputs that must resolve through a Spotify-capable Lavalink source/plugin before they can fall back to another playable provider
+- Spotify links as **metadata-only** inputs that must resolve to another playable provider through Lavalink/extractor support
 
 If a provider cannot be resolved, Serenity now returns clearer errors such as:
 
@@ -208,7 +208,7 @@ You must also provide a reachable Lavalink node. A minimal setup needs:
 
 - a Lavalink v4-compatible server,
 - the host/port/password env vars above,
-- extractor/plugin support for the providers you want (for example a YouTube-capable source manager/plugin, optional SoundCloud support, and a Spotify source/plugin if you expect Spotify metadata resolution),
+- extractor/plugin support for the providers you want,
 - standard Discord voice permissions in the target voice channels.
 
 > Note: Spotify is not directly streamable by the bot. Spotify URLs must resolve to another playable source through your Lavalink stack.

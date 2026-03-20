@@ -22,9 +22,6 @@ const {
 
 const MUSIC_LOG_PREFIX = '[music]';
 const guildStates = new Map();
-const YOUTUBE_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'music.youtube.com']);
-const SPOTIFY_HOSTS = new Set(['open.spotify.com', 'spotify.com']);
-const SOUNDCLOUD_HOSTS = new Set(['soundcloud.com', 'www.soundcloud.com', 'm.soundcloud.com']);
 
 let riffy = null;
 let riffyAvailable = false;
@@ -313,6 +310,14 @@ function getRiffy() {
   return riffy;
 }
 
+function isSubsystemReady() {
+  return Boolean(riffy) && riffyAvailable !== false;
+}
+
+function getSubsystemIssue() {
+  return getDependencyIssue();
+}
+
 function getPlayer(guildId) {
   return riffy?.players?.get(guildId) || null;
 }
@@ -359,250 +364,6 @@ function ensureSameVoiceChannel(member, player) {
   }
 }
 
-function tryParseUrl(input) {
-  try {
-    return new URL(input);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeHost(hostname) {
-  return String(hostname || '').trim().toLowerCase();
-}
-
-function isSpotifyUrl(url) {
-  return SPOTIFY_HOSTS.has(normalizeHost(url?.hostname));
-}
-
-function isSoundCloudUrl(url) {
-  return SOUNDCLOUD_HOSTS.has(normalizeHost(url?.hostname));
-}
-
-function isYouTubeUrl(url) {
-  return YOUTUBE_HOSTS.has(normalizeHost(url?.hostname));
-}
-
-function isYouTubeMusicUrl(url) {
-  return normalizeHost(url?.hostname) === 'music.youtube.com';
-}
-
-function normalizeYouTubeUrl(input) {
-  const parsed = typeof input === 'string' ? tryParseUrl(input) : input;
-  if (!parsed || !isYouTubeUrl(parsed)) return typeof input === 'string' ? input : parsed?.toString();
-
-  const host = normalizeHost(parsed.hostname);
-  const output = new URL('https://www.youtube.com/watch');
-  const videoId =
-    (host === 'youtu.be' ? parsed.pathname.split('/').filter(Boolean)[0] : null)
-    || (parsed.pathname.startsWith('/shorts/') ? parsed.pathname.split('/')[2] : null)
-    || parsed.searchParams.get('v');
-  const playlistId = parsed.searchParams.get('list');
-  const index = parsed.searchParams.get('index');
-  const start = parsed.searchParams.get('t') || parsed.searchParams.get('start');
-
-  if (parsed.pathname === '/playlist' && playlistId) {
-    const playlistUrl = new URL('https://www.youtube.com/playlist');
-    playlistUrl.searchParams.set('list', playlistId);
-    if (index) playlistUrl.searchParams.set('index', index);
-    return playlistUrl.toString();
-  }
-
-  if (videoId) output.searchParams.set('v', videoId);
-  if (playlistId) output.searchParams.set('list', playlistId);
-  if (index) output.searchParams.set('index', index);
-  if (start) output.searchParams.set('t', start);
-
-  return videoId || playlistId ? output.toString() : parsed.toString();
-}
-
-function buildResolveCandidates(rawInput) {
-  const runtimeConfig = getMusicRuntimeConfig();
-  const input = String(rawInput || '').trim();
-  const url = tryParseUrl(input);
-
-  if (!url) {
-    const defaultPrefix = String(runtimeConfig.defaultSearchPlatform || 'ytmsearch').replace(/:$/, '');
-    const candidates = [
-      { label: 'default-search', query: `${defaultPrefix}:${input}`, kind: 'search' },
-    ];
-
-    if (defaultPrefix !== 'ytsearch') {
-      candidates.push({ label: 'youtube-search-fallback', query: `ytsearch:${input}`, kind: 'search' });
-    }
-
-    return {
-      input,
-      originalInput: input,
-      url: null,
-      candidates,
-      isPlainSearch: true,
-      isSpotify: false,
-      isYouTube: false,
-      isYouTubeMusic: false,
-      isSoundCloud: false,
-    };
-  }
-
-  if (isYouTubeMusicUrl(url)) {
-    return {
-      input: normalizeYouTubeUrl(url),
-      originalInput: input,
-      url,
-      candidates: [{ label: 'youtube-music-normalized', query: normalizeYouTubeUrl(url), kind: 'youtube-music-url' }],
-      isPlainSearch: false,
-      isSpotify: false,
-      isYouTube: true,
-      isYouTubeMusic: true,
-      isSoundCloud: false,
-    };
-  }
-
-  if (isYouTubeUrl(url)) {
-    return {
-      input: normalizeYouTubeUrl(url),
-      originalInput: input,
-      url,
-      candidates: [{ label: 'youtube-url', query: normalizeYouTubeUrl(url), kind: 'youtube-url' }],
-      isPlainSearch: false,
-      isSpotify: false,
-      isYouTube: true,
-      isYouTubeMusic: false,
-      isSoundCloud: false,
-    };
-  }
-
-  if (isSpotifyUrl(url)) {
-    return {
-      input,
-      originalInput: input,
-      url,
-      candidates: [{ label: 'spotify-url', query: input, kind: 'spotify-url' }],
-      isPlainSearch: false,
-      isSpotify: true,
-      isYouTube: false,
-      isYouTubeMusic: false,
-      isSoundCloud: false,
-    };
-  }
-
-  if (isSoundCloudUrl(url)) {
-    return {
-      input,
-      originalInput: input,
-      url,
-      candidates: [{ label: 'soundcloud-url', query: input, kind: 'soundcloud-url' }],
-      isPlainSearch: false,
-      isSpotify: false,
-      isYouTube: false,
-      isYouTubeMusic: false,
-      isSoundCloud: true,
-    };
-  }
-
-  return {
-    input,
-    originalInput: input,
-    url,
-    candidates: [{ label: 'direct-url', query: input, kind: 'direct-url' }],
-    isPlainSearch: false,
-    isSpotify: false,
-    isYouTube: false,
-    isYouTubeMusic: false,
-    isSoundCloud: false,
-  };
-}
-
-function hasResolvedTracks(result) {
-  return Boolean(result && Array.isArray(result.tracks) && result.tracks.length);
-}
-
-function buildNoResultsMessage(context) {
-  if (context.isSpotify) {
-    return 'Spotify links are metadata-only. Your Lavalink node needs Spotify source support to resolve that link into a playable YouTube or audio track.';
-  }
-
-  if (context.isYouTubeMusic) {
-    return 'That YouTube Music link could not be resolved. Serenity normalized it for Lavalink, but your node still returned no playable tracks.';
-  }
-
-  if (context.isYouTube) {
-    return 'That YouTube URL did not return a playable track. Make sure your Lavalink node has YouTube source support enabled.';
-  }
-
-  if (context.isPlainSearch) {
-    return 'No playable results were found. Serenity tried YouTube Music search first and then a YouTube search fallback, but Lavalink returned no tracks.';
-  }
-
-  if (context.isSoundCloud) {
-    return 'That SoundCloud URL did not return a playable track. Make sure your Lavalink node has SoundCloud source support enabled.';
-  }
-
-  return 'Failed to resolve a playable track from that input.';
-}
-
-async function resolveTracks({ guildId, query, requester }) {
-  ensurePlaybackAvailable();
-
-  const input = String(query || '').trim();
-  if (!input) {
-    throw new MusicError('Provide a search query or supported URL for `/play`.');
-  }
-
-  const context = buildResolveCandidates(input);
-  updateGuildState(guildId, {
-    lastResolvedQuery: {
-      originalInput: context.originalInput,
-      normalizedInput: context.input,
-      candidates: context.candidates.map((candidate) => candidate.query),
-    },
-  });
-
-  let lastError = null;
-  let lastLoadType = null;
-
-  for (const candidate of context.candidates) {
-    try {
-      logInfo(`Resolving candidate ${candidate.label} for guild ${guildId}: ${candidate.query}`);
-      const result = await riffy.resolve({
-        query: candidate.query,
-        requester,
-      });
-
-      lastLoadType = result?.loadType || null;
-      if (hasResolvedTracks(result)) {
-        return {
-          ...result,
-          resolvedQuery: candidate.query,
-          resolvedLabel: candidate.label,
-          originalInput: context.originalInput,
-        };
-      }
-
-      logWarn(`No tracks returned for candidate ${candidate.label} in guild ${guildId}. loadType=${result?.loadType || 'unknown'}`);
-    } catch (error) {
-      lastError = error;
-      logWarn(`Resolve attempt failed for candidate ${candidate.label} in guild ${guildId}.`, error);
-    }
-  }
-
-  if (lastError) {
-    const message = String(lastError?.message || '').toLowerCase();
-    if (message.includes('youtube')) {
-      throw new MusicError('YouTube resolution failed. Check that your Lavalink node has YouTube support enabled and try another URL or search.');
-    }
-    if (message.includes('soundcloud')) {
-      throw new MusicError('SoundCloud resolution failed. Check that your Lavalink node has SoundCloud support enabled and try another URL or search.');
-    }
-    if (message.includes('spotify')) {
-      throw new MusicError('Spotify links are metadata-only here. Your Lavalink node needs Spotify source support to resolve them into playable audio.');
-    }
-  }
-
-  logWarn(`All resolve candidates returned no playable tracks in guild ${guildId}. Last load type: ${lastLoadType || 'none'}`);
-  throw new MusicError(buildNoResultsMessage(context));
-}
-
 async function createOrReusePlayer({ guild, member, textChannelId }) {
   ensurePlaybackAvailable();
 
@@ -628,6 +389,43 @@ async function createOrReusePlayer({ guild, member, textChannelId }) {
   });
 
   return { player, voiceChannel };
+}
+
+async function resolveTracks({ guildId, query, requesterId }) {
+  ensurePlaybackAvailable();
+
+  const input = String(query || '').trim();
+  if (!input) {
+    throw new MusicError('Provide a search query or supported URL for `/play`.');
+  }
+
+  try {
+    const result = await riffy.resolve({
+      query: input,
+      requester: requesterId,
+      source: input,
+      guildId,
+    });
+
+    if (!result || !Array.isArray(result.tracks) || !result.tracks.length) {
+      throw new MusicError('Failed to resolve a playable track. No results were found for that search or URL.');
+    }
+
+    return result;
+  } catch (error) {
+    if (error instanceof MusicError) throw error;
+    const message = String(error?.message || '').toLowerCase();
+    if (message.includes('spotify')) {
+      throw new MusicError('Spotify links are metadata-only here. Serenity could not resolve that Spotify item into a playable source.');
+    }
+    if (message.includes('youtube')) {
+      throw new MusicError('YouTube failed to return a playable result for that query or URL.');
+    }
+    if (message.includes('soundcloud')) {
+      throw new MusicError('SoundCloud failed to return a playable result for that query or URL.');
+    }
+    throw new MusicError('Failed to resolve a playable track from that input.');
+  }
 }
 
 async function enqueueResolvedTracks(player, resolveResult, requesterId) {
@@ -742,6 +540,8 @@ module.exports = {
   getGuildState,
   getPlayer,
   getRiffy,
+  getSubsystemIssue,
+  isSubsystemReady,
   pausePlayer,
   removePlayerTrack,
   requireControllablePlayer,

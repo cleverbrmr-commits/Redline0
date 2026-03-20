@@ -92,7 +92,7 @@ async function playCommand(source, query) {
   const resolved = await resolveTracks({
     guildId: source.guild.id,
     query,
-    requester: actor || null,
+    requesterId: actor?.id || null,
   });
 
   const queueBefore = snapshotPlayer(player).queueLength;
