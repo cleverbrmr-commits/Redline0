@@ -57,11 +57,12 @@ function buildWelcomerStatusEmbed(config) {
   return makeInfoEmbed({
     title: 'Welcomer status',
     description: welcomer.enabled
-      ? 'The Redline welcome flow is currently **enabled**.'
+      ? 'The Redline welcome flow is currently **enabled** and ready for new joins.'
       : 'The Redline welcome flow is currently **disabled**.',
     fields: [
-      { name: 'Enabled', value: welcomer.enabled ? 'Yes' : 'No', inline: true },
+      { name: 'State', value: welcomer.enabled ? 'Enabled' : 'Disabled', inline: true },
       { name: 'Welcome Channel', value: welcomer.channelId ? `<#${welcomer.channelId}>` : 'Not configured', inline: true },
+      { name: 'Brand', value: 'Welcome to Redline Hub', inline: true },
     ],
     footer: WELCOMER_FOOTER,
   });
@@ -105,23 +106,24 @@ function buildWelcomeEmbed(member) {
   return makeEmbed({
     title: 'Welcome to Redline Hub',
     description: [
-      `${member}, welcome to **${trimText(member.guild.name || 'Redline Hub', 80)}**.`,
-      'Get settled in, check the channels, and enjoy your stay.',
+      `${member}`,
+      `We’re glad to have you in **${trimText(member.guild.name || 'Redline Hub', 80)}**.`,
+      'Take a look around, read the key channels, and enjoy the stay.',
     ].join('\n\n'),
     color: Colors.Red,
     author: {
-      name: member.guild.name || 'Redline Hub',
-      iconURL: member.guild.iconURL({ extension: 'png', size: 512 }) || undefined,
+      name: 'Redline Welcome',
+      iconURL: member.guild.iconURL({ extension: 'png', size: 512 }) || avatarUrl,
     },
     thumbnail: avatarUrl,
     image: avatarUrl,
     fields: [
       { name: 'Member', value: `${member} • \`${member.user.id}\``, inline: false },
-      { name: 'Server', value: trimText(member.guild.name || 'Redline Hub', 100), inline: true },
-      { name: 'Member Count', value: memberCount ? `#${memberCount}` : 'Unknown', inline: true },
       { name: 'Joined', value: `<t:${joinedTimestamp}:F>`, inline: true },
+      { name: 'Community Size', value: memberCount ? `#${memberCount}` : 'Unknown', inline: true },
+      { name: 'Home', value: trimText(member.guild.name || 'Redline Hub', 100), inline: true },
     ],
-    footer: `Welcome aboard • ${member.user.username}`,
+    footer: 'REDLINE • Welcome aboard',
     timestamp: true,
   });
 }

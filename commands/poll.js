@@ -2,6 +2,7 @@ const { PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const {
   buildPollMessagePayload,
   buildPollUsageEmbed,
+  buildPollValidationEmbed,
   parsePrefixPollArgs,
   sendPollMessage,
 } = require('../services/pollService');
@@ -60,6 +61,10 @@ module.exports = {
         .addSubcommand((sub) => addPollOptions(sub.setName('embed').setDescription('Create an embed poll')))
         .addSubcommand((sub) => addPollOptions(sub.setName('normal').setDescription('Create a normal text poll'))),
       async execute({ interaction }) {
+        if (!interaction.channel || typeof interaction.channel.send !== 'function') {
+          return interaction.reply({ embeds: [buildPollValidationEmbed('Use this command in a standard server channel.')], ephemeral: true });
+        }
+
         const mode = interaction.options.getSubcommand();
         const question = interaction.options.getString('question', true);
         const options = extractSlashOptions(interaction);
@@ -76,6 +81,7 @@ module.exports = {
             makeSuccessEmbed({
               title: 'Poll posted',
               description: `Your ${mode} poll is now live in <#${pollMessage.channelId}>.`,
+              footer: 'REDLINE • Reaction poll',
             }),
           ],
           ephemeral: true,
@@ -104,6 +110,7 @@ module.exports = {
             makeSuccessEmbed({
               title: 'Poll posted',
               description: `Your ${parsed.mode} poll is now live in ${message.channel}.`,
+              footer: 'REDLINE • Reaction poll',
             }),
           ],
         });

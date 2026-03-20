@@ -1,5 +1,6 @@
 const { makeWarningEmbed } = require('../utils/embeds');
 const { parsePrefixInvocation } = require('../services/prefixService');
+const { prettyError } = require('../utils/helpers');
 
 function createMessageHandler(client, commandRegistry, prefixName) {
   return async function onMessage(message) {
@@ -28,7 +29,14 @@ function createMessageHandler(client, commandRegistry, prefixName) {
       return true;
     } catch (error) {
       console.error('Prefix command error:', error);
-      await message.reply({ embeds: [makeWarningEmbed({ title: 'Command failed', description: error?.message || 'Something went wrong.' })] }).catch(() => null);
+      await message.reply({
+        embeds: [
+          makeWarningEmbed({
+            title: 'Command failed',
+            description: prettyError(error),
+          }),
+        ],
+      }).catch(() => null);
       return false;
     }
   };

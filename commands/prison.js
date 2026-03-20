@@ -225,11 +225,30 @@ module.exports = {
           { prefix: '🩸 REDLINE Notice', footer: 'REDLINE • Priority Broadcast', color: Colors.Gold },
         ];
         const style = pick(styles);
+        const guildName = interaction.guild?.name || 'Redline Hub';
+        const postedAt = Math.floor(Date.now() / 1000);
+        const body = trimText(message, 3500);
+
         await logAnnouncement(client, interaction, title);
         return interaction.reply({
           content: '@everyone',
           allowedMentions: { parse: ['everyone'] },
-          embeds: [makeEmbed({ title: `${style.prefix} • ${trimText(title, 220)}`, description: message, footer: style.footer, color: style.color })],
+          embeds: [makeEmbed({
+            title: `${style.prefix} • ${trimText(title, 220)}`,
+            description: body,
+            author: {
+              name: `${guildName} Announcement`,
+              iconURL: interaction.guild?.iconURL({ extension: 'png', size: 512 }) || interaction.user.displayAvatarURL({ size: 512 }),
+            },
+            fields: [
+              { name: 'Posted By', value: `${interaction.user}`, inline: true },
+              { name: 'Channel', value: `${interaction.channel}`, inline: true },
+              { name: 'Published', value: `<t:${postedAt}:F>`, inline: true },
+            ],
+            footer: style.footer,
+            color: style.color,
+            thumbnail: interaction.guild?.iconURL({ extension: 'png', size: 512 }) || null,
+          })],
         });
       },
     },
