@@ -1,274 +1,219 @@
+const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+} = require('discord.js');
 const { makeEmbed, makeInfoEmbed, makeWarningEmbed } = require('../utils/embeds');
 const { trimText } = require('../utils/helpers');
+const { getModule, listModules } = require('./moduleService');
 
 const FIELD_LIMIT = 1024;
-const SAFE_FIELD_LIMIT = 900;
-const EMBED_DESCRIPTION_LIMIT = 4096;
-const MAX_FIELDS_PER_EMBED = 6;
-
-function trim(text, max) {
-  return trimText(text, max);
-}
-
-function toTitleCase(value) {
-  return String(value || 'other')
-    .replace(/[-_]/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
+const MODULE_SELECT_ID = 'serenity:help:module';
+const COMMAND_SELECT_ID = 'serenity:help:command';
+const HOME_BUTTON_ID = 'serenity:help:home';
 
 function uniqueByName(commands) {
   const seen = new Set();
-  const result = [];
-
-  for (const command of commands) {
-    const name = command?.name || command?.data?.name;
-    if (!name || seen.has(name)) continue;
+  return commands.filter((command) => {
+    const name = command?.metadata?.name || command?.name;
+    if (!name || seen.has(name)) return false;
     seen.add(name);
-    result.push(command);
-  }
-
-  return result;
+    return true;
+  });
 }
 
 function getAllCommands(commandRegistry) {
   if (!commandRegistry) return [];
-
-  if (commandRegistry instanceof Map) {
-    return uniqueByName([...commandRegistry.values()]);
-  }
-
-  if (Array.isArray(commandRegistry)) {
-    return uniqueByName(commandRegistry);
-  }
-
-  if (Array.isArray(commandRegistry.commands)) {
-    return uniqueByName(commandRegistry.commands);
-  }
-
-  if (typeof commandRegistry === 'object') {
-    return uniqueByName(Object.values(commandRegistry));
-  }
-
+  if (commandRegistry instanceof Map) return uniqueByName([...commandRegistry.values()]);
+  if (Array.isArray(commandRegistry)) return uniqueByName(commandRegistry);
+  if (typeof commandRegistry === 'object') return uniqueByName(Object.values(commandRegistry));
   return [];
 }
 
-function getCommandName(command) {
-  return command?.name || command?.data?.name || 'unknown';
+function getCategoryCommands(commandRegistry, category) {
+  return getAllCommands(commandRegistry)
+    .filter((command) => command.metadata?.category === category)
+    .sort((a, b) => commandLabel(a).localeCompare(commandLabel(b)));
 }
 
-function getMeta(command) {
-  return command?.metadata || command?.meta || {};
-}
-
-function getCommandCategory(command) {
-  return command?.category || getMeta(command).category || 'other';
-}
-
-function getCommandDescription(command) {
-  return command?.description || getMeta(command).description || command?.data?.description || 'No description provided.';
-}
-
-function getCommandUsage(command) {
-  const usage = command?.usage || getMeta(command).usage;
-  if (Array.isArray(usage)) {
-    return usage.join('\n');
-  }
-  return usage || `/${getCommandName(command)}`;
-}
-
-function getCommandExamples(command) {
-  const examples = command?.examples || getMeta(command).examples || [];
-  return Array.isArray(examples) ? examples : [examples];
-}
-
-function getCommandPrefixUsage(command, prefixName) {
-  const meta = getMeta(command);
-  const prefixUsage = meta.prefixUsage || command?.prefixUsage;
-  if (Array.isArray(prefixUsage) && prefixUsage.length) {
-    return prefixUsage.join('\n');
-  }
-  if (typeof prefixUsage === 'string' && prefixUsage.trim()) {
-    return prefixUsage;
-  }
-  return supportsPrefix(command) ? `${prefixName} ${getCommandName(command)}` : 'Not supported';
+function commandLabel(command) {
+  return command?.metadata?.name || command?.name || 'unknown';
 }
 
 function getCommandPermissions(command) {
-  const permissions = command?.permissions || getMeta(command).permissions || command?.defaultMemberPermissions || null;
-  if (!permissions) return 'Everyone';
-  if (Array.isArray(permissions)) return permissions.join(', ');
-  return String(permissions);
-}
-
-function supportsPrefix(command) {
-  const meta = getMeta(command);
-  if (meta.prefixEnabled === false) return false;
-  if (command?.prefix === false) return false;
-  if (command?.meta?.prefix === false) return false;
-  return typeof command?.executePrefix === 'function' || meta.prefixEnabled === true;
+  return (command.metadata?.permissions || ['Everyone']).join(', ');
 }
 
 function findCommand(commandRegistry, query) {
-  const commands = getAllCommands(commandRegistry);
   const normalized = String(query || '').trim().toLowerCase();
+  return getAllCommands(commandRegistry).find((command) => {
+    if (commandLabel(command).toLowerCase() === normalized) return true;
+    return (command.metadata?.aliases || []).some((alias) => String(alias).toLowerCase() === normalized);
+  }) || null;
+}
 
-  return commands.find((command) => {
-    const name = getCommandName(command).toLowerCase();
-    if (name === normalized) return true;
+function getCategorySummary(commandRegistry) {
+  return listModules()
+    .map((module) => ({
+      ...module,
+      commands: getCategoryCommands(commandRegistry, module.key),
+    }))
+    .filter((module) => module.commands.length);
+}
 
-    const aliases = command?.aliases || getMeta(command).aliases || [];
-    return aliases.map((alias) => String(alias).toLowerCase()).includes(normalized);
+function buildHomeEmbed(commandRegistry, prefixName = 'Serenity') {
+  const modules = getCategorySummary(commandRegistry);
+  const totalCommands = getAllCommands(commandRegistry).length;
+
+  return makeEmbed({
+    title: 'Serenity Command Center',
+    description: [
+      'Premium module-driven navigation for the current command runtime.',
+      `Use the menu below to browse modules, or run \`/help command:<name>\` for a detailed command card. Prefix-compatible commands still respond to \`${prefixName} <command>\`.`,
+    ].join('\n\n'),
+    fields: modules.slice(0, 12).map((module) => ({
+      name: `${module.emoji} ${module.label}`,
+      value: `${trimText(module.description, 120)}\n**Commands:** ${module.commands.length}`,
+      inline: true,
+    })),
+    footer: `SERENITY • ${modules.length} modules • ${totalCommands} commands`,
   });
 }
 
-function chunkLines(lines, maxLen = SAFE_FIELD_LIMIT) {
-  const chunks = [];
-  let current = '';
-
-  for (const line of lines) {
-    const candidate = current ? `${current}\n${line}` : line;
-
-    if (candidate.length <= maxLen) {
-      current = candidate;
-      continue;
-    }
-
-    if (current) {
-      chunks.push(current);
-      current = '';
-    }
-
-    if (line.length <= maxLen) {
-      current = line;
-      continue;
-    }
-
-    let remaining = line;
-    while (remaining.length > maxLen) {
-      chunks.push(`${remaining.slice(0, maxLen - 3)}...`);
-      remaining = remaining.slice(maxLen - 3);
-    }
-
-    current = remaining;
-  }
-
-  if (current) chunks.push(current);
-
-  return chunks;
-}
-
-function groupCommandsByCategory(commands) {
-  const grouped = new Map();
-
-  for (const command of commands) {
-    const category = getCommandCategory(command);
-    if (!grouped.has(category)) grouped.set(category, []);
-    grouped.get(category).push(command);
-  }
-
-  return grouped;
-}
-
-function formatOverviewLine(command) {
-  const slash = `/${getCommandName(command)}`;
-  const description = trim(getCommandDescription(command), 110);
-  const prefixBadge = supportsPrefix(command) ? ' • Prefix' : '';
-  return `**${slash}**${prefixBadge}\n${description}`;
-}
-
-function buildHelpOverviewEmbeds(commandRegistry, prefixName = 'Serenity') {
-  const commands = getAllCommands(commandRegistry).sort((a, b) => getCommandName(a).localeCompare(getCommandName(b)));
+function buildModuleEmbed(commandRegistry, moduleKey, prefixName = 'Serenity') {
+  const module = getModule(moduleKey);
+  const commands = getCategoryCommands(commandRegistry, moduleKey);
 
   if (!commands.length) {
-    return [
-      makeWarningEmbed({
-        title: 'Help unavailable',
-        description: 'No commands are currently loaded.',
-      }),
-    ];
-  }
-
-  const grouped = groupCommandsByCategory(commands);
-  const fieldQueue = [];
-
-  for (const [category, categoryCommands] of grouped.entries()) {
-    const lines = categoryCommands.map(formatOverviewLine);
-    const chunks = chunkLines(lines);
-
-    chunks.forEach((chunk, index) => {
-      fieldQueue.push({
-        name: index === 0 ? `${toTitleCase(category)} Commands` : `${toTitleCase(category)} Commands (cont.)`,
-        value: trim(chunk, FIELD_LIMIT),
-        inline: false,
-      });
+    return makeWarningEmbed({
+      title: `Module unavailable • ${module.label}`,
+      description: 'No commands are currently registered under that module.',
+      footer: 'SERENITY • Help center',
     });
   }
 
-  const embeds = [];
-  for (let index = 0; index < fieldQueue.length; index += MAX_FIELDS_PER_EMBED) {
-    const fields = fieldQueue.slice(index, index + MAX_FIELDS_PER_EMBED);
-    embeds.push(makeEmbed({
-      title: index === 0 ? 'Redline Help Desk' : 'Redline Help Desk (cont.)',
-      description: index === 0
-        ? trim(
-          `Browse commands by category below. Use \`/help command:<name>\` for detail cards, or \`${prefixName} help <command>\` where prefix support is available.`,
-          EMBED_DESCRIPTION_LIMIT,
-        )
-        : 'More commands from the current runtime registry.',
-      fields,
-      footer: `REDLINE • ${commands.length} command${commands.length === 1 ? '' : 's'} loaded`,
-    }));
-  }
-
-  return embeds;
+  return makeInfoEmbed({
+    title: `${module.emoji} ${module.label}`,
+    description: `${module.description}\n\nChoose a command from the second menu for full usage and examples. Prefix-ready commands use \`${prefixName} <command>\`.`,
+    fields: commands.slice(0, 15).map((command) => ({
+      name: `/${commandLabel(command)}`,
+      value: `${trimText(command.metadata?.description || 'No description provided.', 120)}\n**Permissions:** ${trimText(getCommandPermissions(command), 80)}`,
+      inline: true,
+    })),
+    footer: `SERENITY • ${commands.length} command${commands.length === 1 ? '' : 's'} in this module`,
+  });
 }
 
 function buildHelpCommandEmbed(commandRegistry, query, prefixName = 'Serenity') {
-  const command = findCommand(commandRegistry, query);
+  const command = typeof query === 'string' ? findCommand(commandRegistry, query) : query;
 
   if (!command) {
     return makeWarningEmbed({
       title: 'Unknown command',
       description: `No help entry was found for \`${query}\`.`,
+      footer: 'SERENITY • Help center',
     });
   }
 
-  const name = getCommandName(command);
-  const description = trim(getCommandDescription(command), EMBED_DESCRIPTION_LIMIT);
-  const usage = getCommandUsage(command)
-    .split('\n')
-    .filter(Boolean)
-    .map((entry) => `• \`${trim(entry, 140)}\``)
-    .join('\n') || 'None';
-  const examples = getCommandExamples(command)
-    .filter(Boolean)
-    .map((example) => `• \`${trim(example, 140)}\``)
-    .join('\n') || 'None';
-  const aliases = command?.aliases || getMeta(command).aliases || [];
-  const prefixUsage = getCommandPrefixUsage(command, prefixName);
-  const permissions = trim(getCommandPermissions(command), FIELD_LIMIT);
-  const responseMode = String(getMeta(command).response || 'public');
+  const module = getModule(command.metadata?.category);
+  const usage = (command.metadata?.usage || [`/${commandLabel(command)}`])
+    .map((entry) => `• \`${trimText(entry, 160)}\``)
+    .join('\n');
+  const examples = (command.metadata?.examples || [])
+    .map((entry) => `• \`${trimText(entry, 160)}\``)
+    .join('\n') || 'None provided.';
+  const prefixUsage = command.metadata?.prefixEnabled
+    ? (command.metadata?.prefixUsage || []).map((entry) => `• \`${trimText(entry, 160)}\``).join('\n')
+    : 'Not supported';
 
   return makeInfoEmbed({
-    title: `Help • /${name}`,
-    description,
+    title: `/${commandLabel(command)}`,
+    description: trimText(command.metadata?.description || 'No description provided.', 4096),
     fields: [
-      { name: 'Category', value: toTitleCase(getCommandCategory(command)), inline: true },
-      { name: 'Response', value: toTitleCase(responseMode), inline: true },
-      { name: 'Permissions', value: permissions, inline: true },
-      { name: 'Slash Usage', value: `• \`/${name}\``, inline: false },
-      { name: 'Full Usage', value: usage, inline: false },
-      { name: 'Prefix Usage', value: supportsPrefix(command) ? prefixUsage.split('\n').map((entry) => `• \`${trim(entry, 140)}\``).join('\n') : 'Not supported', inline: false },
+      { name: 'Module', value: `${module.emoji} ${module.label}`, inline: true },
+      { name: 'Response', value: command.metadata?.response || 'public', inline: true },
+      { name: 'Permissions', value: trimText(getCommandPermissions(command), FIELD_LIMIT), inline: true },
+      { name: 'Slash Usage', value: usage, inline: false },
+      { name: 'Prefix Usage', value: prefixUsage, inline: false },
       { name: 'Examples', value: examples, inline: false },
-      { name: 'Aliases', value: aliases.length ? aliases.map((alias) => `\`${alias}\``).join(', ') : 'None', inline: false },
+      { name: 'Aliases', value: command.metadata?.aliases?.length ? command.metadata.aliases.map((alias) => `\`${alias}\``).join(', ') : 'None', inline: false },
+      { name: 'Restrictions', value: command.metadata?.restrictions?.length ? command.metadata.restrictions.map((entry) => `• ${trimText(entry, 180)}`).join('\n') : 'No extra restrictions documented.', inline: false },
     ],
-    footer: `REDLINE • ${supportsPrefix(command) ? 'Slash + prefix ready' : 'Slash only'}`,
+    footer: `SERENITY • ${command.metadata?.prefixEnabled ? 'Slash + prefix ready' : 'Slash only'}`,
   });
 }
 
+function buildHelpComponents(commandRegistry, selectedModule = null) {
+  const modules = getCategorySummary(commandRegistry);
+  const moduleMenu = new StringSelectMenuBuilder()
+    .setCustomId(MODULE_SELECT_ID)
+    .setPlaceholder('Browse a module')
+    .addOptions(modules.slice(0, 25).map((module) => ({
+      label: module.label,
+      description: trimText(`${module.commands.length} commands • ${module.accent}`, 100),
+      value: module.key,
+      emoji: module.emoji,
+      default: selectedModule === module.key,
+    })));
+
+  const commandOptions = selectedModule
+    ? getCategoryCommands(commandRegistry, selectedModule).slice(0, 25).map((command) => ({
+      label: `/${commandLabel(command)}`,
+      description: trimText(command.metadata?.description || 'No description', 100),
+      value: commandLabel(command),
+    }))
+    : [{ label: 'Select a module first', description: 'Pick a module to load command choices.', value: '__none__' }];
+
+  const commandMenu = new StringSelectMenuBuilder()
+    .setCustomId(COMMAND_SELECT_ID)
+    .setPlaceholder(selectedModule ? 'Open a command card' : 'Select a module first')
+    .setDisabled(!selectedModule)
+    .addOptions(commandOptions);
+
+  const homeButton = new ButtonBuilder()
+    .setCustomId(HOME_BUTTON_ID)
+    .setLabel('Home')
+    .setStyle(ButtonStyle.Secondary);
+
+  return [
+    new ActionRowBuilder().addComponents(moduleMenu),
+    new ActionRowBuilder().addComponents(commandMenu),
+    new ActionRowBuilder().addComponents(homeButton),
+  ];
+}
+
+function buildHelpHomePayload(commandRegistry, prefixName = 'Serenity') {
+  return {
+    embeds: [buildHomeEmbed(commandRegistry, prefixName)],
+    components: buildHelpComponents(commandRegistry, null),
+  };
+}
+
+function buildHelpModulePayload(commandRegistry, moduleKey, prefixName = 'Serenity') {
+  return {
+    embeds: [buildModuleEmbed(commandRegistry, moduleKey, prefixName)],
+    components: buildHelpComponents(commandRegistry, moduleKey),
+  };
+}
+
+function buildHelpCommandPayload(commandRegistry, query, prefixName = 'Serenity') {
+  const command = findCommand(commandRegistry, query);
+  return {
+    embeds: [buildHelpCommandEmbed(commandRegistry, command || query, prefixName)],
+    components: buildHelpComponents(commandRegistry, command?.metadata?.category || null),
+  };
+}
+
 module.exports = {
+  COMMAND_SELECT_ID,
+  HOME_BUTTON_ID,
+  MODULE_SELECT_ID,
   buildHelpCommandEmbed,
-  buildHelpOverviewEmbeds,
+  buildHelpCommandPayload,
+  buildHelpComponents,
+  buildHelpHomePayload,
+  buildHelpModulePayload,
   findCommand,
   getAllCommands,
 };

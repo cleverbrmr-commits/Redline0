@@ -1,5 +1,9 @@
 const { Events, REST, Routes } = require('discord.js');
 const { handleButton, handleStringSelect } = require('../services/panelService');
+const { buildAccessDeniedPayload, validateCommandAccess } = require('../services/accessService');
+const { COMMAND_SELECT_ID, HOME_BUTTON_ID, MODULE_SELECT_ID, buildHelpCommandPayload, buildHelpHomePayload, buildHelpModulePayload } = require('../services/helpService');
+const { logCommandUsage } = require('../services/logService');
+const { normalizeCommand } = require('../services/moduleService');
 const { makeWarningEmbed } = require('../utils/embeds');
 const { prettyError } = require('../utils/helpers');
 
@@ -9,15 +13,12 @@ function buildCommandRegistry(commandModules) {
   const commands = commandModules.flatMap((entry) => entry.commands || []);
   const registry = new Map();
 
-  for (const command of commands) {
-    if (!command?.name) {
-      continue;
-    }
-
+  for (const rawCommand of commands) {
+    const command = normalizeCommand(rawCommand);
+    if (!command?.name) continue;
     if (registry.has(command.name)) {
       throw new Error(`Duplicate command definition detected for "${command.name}".`);
     }
-
     registry.set(command.name, command);
   }
 
@@ -30,29 +31,17 @@ async function registerCommands(commandRegistry) {
   console.log(`[startup] registering ${body.length} slash commands for guild ${process.env.GUILD_ID}`);
   console.log(`[startup] slash command names: ${body.map((command) => command.name).join(', ')}`);
 
-  await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), {
-    body,
-  });
-
+  await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body });
   return body.length;
 }
 
 async function ensureInteractionAcknowledged(interaction, label) {
-  if (interaction.deferred || interaction.replied) {
-    return true;
-  }
-
+  if (interaction.deferred || interaction.replied) return true;
   console.error(`[interaction] ${label} completed without acknowledging the interaction.`);
   await interaction.reply({
-    embeds: [
-      makeWarningEmbed({
-        title: 'Command wiring error',
-        description: 'This command finished without sending a response. Check the bot logs.',
-      }),
-    ],
+    embeds: [makeWarningEmbed({ title: 'Command wiring error', description: 'This command finished without sending a response. Check the bot logs.' })],
     ephemeral: true,
   }).catch(() => null);
-
   return false;
 }
 
@@ -75,20 +64,13 @@ function createInteractionFacade(interaction) {
 
   const facade = Object.create(interaction);
   facade.reply = async (payload = {}) => {
-    if (interaction.deferred && !interaction.replied) {
-      return editReply(normalizeDeferredPayload(payload));
-    }
-
-    if (interaction.replied) {
-      return followUp(payload);
-    }
-
+    if (interaction.deferred && !interaction.replied) return editReply(normalizeDeferredPayload(payload));
+    if (interaction.replied) return followUp(payload);
     return reply(payload);
   };
   facade.editReply = async (payload = {}) => editReply(normalizeDeferredPayload(payload));
   facade.followUp = async (payload = {}) => followUp(payload);
   facade.deferReply = async (payload = {}) => deferReply(payload);
-
   return facade;
 }
 
@@ -101,15 +83,33 @@ async function executeSlashCommand({ client, interaction, command, commandRegist
   }, AUTO_DEFER_DELAY_MS);
 
   try {
-    await command.execute({
-      client,
-      interaction: interactionFacade,
-      commandRegistry,
-      prefixName,
-    });
+    await command.execute({ client, interaction: interactionFacade, commandRegistry, prefixName });
   } finally {
     clearTimeout(autoDeferTimer);
   }
+}
+
+async function maybeHandleBuiltInHelpComponent(interaction, commandRegistry, prefixName) {
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === MODULE_SELECT_ID) {
+      const moduleKey = interaction.values?.[0];
+      return interaction.reply ? interaction.update(buildHelpModulePayload(commandRegistry, moduleKey, prefixName)) : false;
+    }
+
+    if (interaction.customId === COMMAND_SELECT_ID) {
+      const commandName = interaction.values?.[0];
+      if (!commandName || commandName === '__none__') {
+        return interaction.reply({ embeds: [makeWarningEmbed({ title: 'Select a module first', description: 'Choose a module to unlock command detail cards.' })], ephemeral: true });
+      }
+      return interaction.update(buildHelpCommandPayload(commandRegistry, commandName, prefixName));
+    }
+  }
+
+  if (interaction.isButton() && interaction.customId === HOME_BUTTON_ID) {
+    return interaction.update(buildHelpHomePayload(commandRegistry, prefixName));
+  }
+
+  return false;
 }
 
 function createInteractionHandler(client, commandRegistry, prefixName) {
@@ -120,8 +120,13 @@ function createInteractionHandler(client, commandRegistry, prefixName) {
         if (command?.autocomplete) {
           return await command.autocomplete({ client, interaction, commandRegistry, prefixName });
         }
-
         return interaction.respond([]);
+      }
+
+      const builtinHelpHandled = await maybeHandleBuiltInHelpComponent(interaction, commandRegistry, prefixName);
+      if (builtinHelpHandled) {
+        await ensureInteractionAcknowledged(interaction, `help component "${interaction.customId}"`);
+        return true;
       }
 
       if (interaction.isChatInputCommand()) {
@@ -129,19 +134,24 @@ function createInteractionHandler(client, commandRegistry, prefixName) {
         if (!command) {
           console.error(`[interaction] received unknown slash command "${interaction.commandName}"`);
           await interaction.reply({
-            embeds: [
-              makeWarningEmbed({
-                title: 'Command unavailable',
-                description: `The \`/${interaction.commandName}\` command is registered in Discord but is not loaded by the bot.`,
-              }),
-            ],
+            embeds: [makeWarningEmbed({ title: 'Command unavailable', description: `The \`/${interaction.commandName}\` command is registered in Discord but is not loaded by the bot.` })],
             ephemeral: true,
           }).catch(() => null);
           return false;
         }
 
+        const member = interaction.member;
+        const access = await validateCommandAccess({ guildId: interaction.guildId, command, member, channelId: interaction.channelId });
+        if (!access.allowed) {
+          await interaction.reply(buildAccessDeniedPayload(access.reason)).catch(() => null);
+          return false;
+        }
+
         await executeSlashCommand({ client, interaction, command, commandRegistry, prefixName });
         await ensureInteractionAcknowledged(interaction, `slash command "${interaction.commandName}"`);
+        if (command.metadata?.permissions?.length && !command.metadata.permissions.includes('Everyone')) {
+          await logCommandUsage(client, interaction, command);
+        }
         return true;
       }
 
@@ -149,19 +159,10 @@ function createInteractionHandler(client, commandRegistry, prefixName) {
         const handled = await handleStringSelect(client, interaction);
         if (!handled && !interaction.deferred && !interaction.replied) {
           console.error(`[interaction] unhandled string select "${interaction.customId}"`);
-          await interaction.reply({
-            embeds: [
-              makeWarningEmbed({
-                title: 'Component unavailable',
-                description: 'That menu is no longer active or could not be handled.',
-              }),
-            ],
-            ephemeral: true,
-          }).catch(() => null);
+          await interaction.reply({ embeds: [makeWarningEmbed({ title: 'Component unavailable', description: 'That menu is no longer active or could not be handled.' })], ephemeral: true }).catch(() => null);
         } else if (handled) {
           await ensureInteractionAcknowledged(interaction, `string select "${interaction.customId}"`);
         }
-
         return handled || false;
       }
 
@@ -169,40 +170,24 @@ function createInteractionHandler(client, commandRegistry, prefixName) {
         const handled = await handleButton(client, interaction);
         if (!handled && !interaction.deferred && !interaction.replied) {
           console.error(`[interaction] unhandled button "${interaction.customId}"`);
-          await interaction.reply({
-            embeds: [
-              makeWarningEmbed({
-                title: 'Component unavailable',
-                description: 'That button is no longer active or could not be handled.',
-              }),
-            ],
-            ephemeral: true,
-          }).catch(() => null);
+          await interaction.reply({ embeds: [makeWarningEmbed({ title: 'Component unavailable', description: 'That button is no longer active or could not be handled.' })], ephemeral: true }).catch(() => null);
         } else if (handled) {
           await ensureInteractionAcknowledged(interaction, `button "${interaction.customId}"`);
         }
-
         return handled || false;
       }
 
       return false;
     } catch (err) {
       console.error('Interaction error:', err);
-
       const embed = makeWarningEmbed({ title: 'Request could not be completed', description: prettyError(err) });
 
       if (interaction.deferred) {
-        try {
-          await interaction.editReply({ embeds: [embed] });
-        } catch {}
+        try { await interaction.editReply({ embeds: [embed] }); } catch {}
       } else if (interaction.replied) {
-        try {
-          await interaction.followUp({ embeds: [embed], ephemeral: true });
-        } catch {}
+        try { await interaction.followUp({ embeds: [embed], ephemeral: true }); } catch {}
       } else {
-        try {
-          await interaction.reply({ embeds: [embed], ephemeral: true });
-        } catch {}
+        try { await interaction.reply({ embeds: [embed], ephemeral: true }); } catch {}
       }
 
       return false;

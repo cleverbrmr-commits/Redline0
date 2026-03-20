@@ -1,25 +1,26 @@
 const { SlashCommandBuilder } = require('discord.js');
 const {
-  buildHelpOverviewEmbeds,
-  buildHelpCommandEmbed,
+  buildHelpCommandPayload,
+  buildHelpHomePayload,
 } = require('../services/helpService');
 
 module.exports = {
   commands: [
     {
       name: 'help',
-      category: 'utility',
-      description: 'Show all commands or detailed help for one command.',
-      usage: '/help [command]',
-      examples: [
-        '/help',
-        '/help command:ban',
-        'Serenity help',
-        'Serenity help ban',
-      ],
+      metadata: {
+        category: 'system',
+        description: 'Browse Serenity modules, command cards, and usage guidance through an interactive help center.',
+        usage: ['/help', '/help command:<name>'],
+        examples: ['/help', '/help command:ban', 'Serenity help', 'Serenity help ban'],
+        permissions: ['Everyone'],
+        response: 'ephemeral interactive',
+        prefixEnabled: true,
+        prefixUsage: ['Serenity help', 'Serenity help ban'],
+      },
       data: new SlashCommandBuilder()
         .setName('help')
-        .setDescription('Show all commands or detailed help for one command')
+        .setDescription('Browse Serenity help and modules')
         .addStringOption((option) =>
           option
             .setName('command')
@@ -32,12 +33,10 @@ module.exports = {
         const resolvedPrefix = prefixName || 'Serenity';
 
         if (query) {
-          const embed = buildHelpCommandEmbed(commandRegistry, query, resolvedPrefix);
-          return interaction.reply({ embeds: [embed] });
+          return interaction.reply({ ...buildHelpCommandPayload(commandRegistry, query, resolvedPrefix), ephemeral: true });
         }
 
-        const embeds = buildHelpOverviewEmbeds(commandRegistry, resolvedPrefix);
-        return interaction.reply({ embeds });
+        return interaction.reply({ ...buildHelpHomePayload(commandRegistry, resolvedPrefix), ephemeral: true });
       },
 
       async executePrefix({ message, args, commandRegistry, prefixName }) {
@@ -45,12 +44,10 @@ module.exports = {
         const resolvedPrefix = prefixName || 'Serenity';
 
         if (query) {
-          const embed = buildHelpCommandEmbed(commandRegistry, query, resolvedPrefix);
-          return message.reply({ embeds: [embed] });
+          return message.reply(buildHelpCommandPayload(commandRegistry, query, resolvedPrefix));
         }
 
-        const embeds = buildHelpOverviewEmbeds(commandRegistry, resolvedPrefix);
-        return message.reply({ embeds });
+        return message.reply(buildHelpHomePayload(commandRegistry, resolvedPrefix));
       },
     },
   ],
