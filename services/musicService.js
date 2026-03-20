@@ -8,44 +8,32 @@ const {
   getGuildQueue,
   getOrCreateGuildQueue,
   getQueueSize,
-  peekNextTrack,
   removeTrack,
   setCurrentTrack,
   setLoopMode,
   setQueueConnection,
   setQueueVolume,
-  shiftNextTrack,
   shuffleQueue,
   waitForConnectionReady,
 } = require('./queueService');
 const {
   createAudioResource,
   entersState,
-  generateDependencyReport,
   joinVoiceChannel,
   StreamType,
   VoiceConnectionStatus,
 } = require('@discordjs/voice');
 const play = require('play-dl');
 const { ChannelType, PermissionsBitField } = require('discord.js');
-const {
-  buildNowPlayingEmbed,
-  buildPlayEmbed,
-  buildQueueEmbed,
-  buildRemovedEmbed,
-  buildStateEmbed,
-} = require('../utils/musicEmbeds');
+const { buildNowPlayingEmbed, buildPlayEmbed, buildQueueEmbed, buildRemovedEmbed, buildStateEmbed } = require('../utils/musicEmbeds');
 
 const MUSIC_LOG_PREFIX = '[music]';
 const MUSIC_IDLE_TIMEOUT_MS = 120_000;
-const MAX_PLAYLIST_TRACKS = 50;
 
 class MusicError extends Error {
-  constructor(message, options = {}) {
+  constructor(message) {
     super(message);
     this.name = 'MusicError';
-    this.code = options.code || 'MUSIC_ERROR';
-    this.cause = options.cause;
   }
 }
 
@@ -57,473 +45,24 @@ function logInfo(message) {
 
 function logWarn(message, error = null) {
   console.warn(`${MUSIC_LOG_PREFIX} ${message}`);
-  if (error) {
-    console.warn(error);
-  }
+  if (error) console.warn(error);
 }
 
-function isLikelyUrl(value) {
-  return /^(https?:\/\/|www\.)/i.test(String(value || '').trim());
-}
-
-function normalizeUrlInput(input) {
-  const raw = String(input || '').trim();
-  if (!raw) return { normalized: raw, providerLabel: null };
-
-  let parsed = null;
-  try {
-    parsed = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
-  } catch {
-    return { normalized: raw, providerLabel: null };
-  }
-
-  const host = parsed.hostname.toLowerCase();
-  if (host === 'music.youtube.com') {
-    const videoId = parsed.searchParams.get('v');
-    const listId = parsed.searchParams.get('list');
-
-    if (videoId) {
-      const normalized = new URL('https://www.youtube.com/watch');
-      normalized.searchParams.set('v', videoId);
-      if (listId) normalized.searchParams.set('list', listId);
-      return { normalized: normalized.toString(), providerLabel: 'YouTube Music' };
-    }
-
-    if (listId) {
-      const normalized = new URL('https://www.youtube.com/playlist');
-      normalized.searchParams.set('list', listId);
-      return { normalized: normalized.toString(), providerLabel: 'YouTube Music' };
-    }
-  }
-
-  if (host === 'youtu.be') {
-    const videoId = parsed.pathname.replace(/^\//, '').trim();
-    if (videoId) {
-      const normalized = new URL('https://www.youtube.com/watch');
-      normalized.searchParams.set('v', videoId);
-      for (const [key, value] of parsed.searchParams.entries()) {
-        normalized.searchParams.set(key, value);
-      }
-      return { normalized: normalized.toString(), providerLabel: 'YouTube' };
-    }
-  }
-
-  return { normalized: parsed.toString(), providerLabel: null };
-}
-
-function providerLabelFromUrl(url) {
-  const value = String(url || '').toLowerCase();
-  if (value.includes('spotify.com')) return 'Spotify';
-  if (value.includes('soundcloud.com')) return 'SoundCloud';
-  if (value.includes('youtube.com') || value.includes('youtu.be')) return 'YouTube';
-  return 'Unknown';
-}
-
-function inferArtist(entry) {
-  return entry?.channel?.name
-    || entry?.channel?.toString?.()
-    || entry?.channel
-    || entry?.artist?.name
-    || entry?.artists?.map?.((artist) => artist.name).filter(Boolean).join(', ')
-    || entry?.user?.name
-    || entry?.uploader?.name
-    || null;
-}
-
-function parseDurationRaw(raw) {
-  if (!raw || typeof raw !== 'string') return 0;
-  const parts = raw.split(':').map((part) => Number(part));
-  if (parts.some((part) => !Number.isFinite(part))) return 0;
-  let seconds = 0;
-  while (parts.length) {
-    seconds = (seconds * 60) + parts.shift();
-  }
-  return seconds * 1000;
-}
-
-function toTrackPayload(entry, requestedBy, overrides = {}) {
-  const baseUrl = entry?.url || entry?.permalink || entry?.href || null;
-  const playbackUrl = overrides.playbackUrl || baseUrl;
-  const provider = overrides.provider || providerLabelFromUrl(playbackUrl || baseUrl);
-
-  return {
-    id: overrides.id || entry?.id || playbackUrl || `${Date.now()}-${Math.random()}`,
-    title: overrides.title || entry?.title || entry?.name || 'Unknown track',
-    url: overrides.url || baseUrl || playbackUrl,
-    playbackUrl: playbackUrl || baseUrl,
-    durationMs: overrides.durationMs || (entry?.durationInSec ? entry.durationInSec * 1000 : entry?.durationRaw ? parseDurationRaw(entry.durationRaw) : entry?.durationInMs || entry?.duration || 0),
-    thumbnail: overrides.thumbnail || entry?.thumbnails?.[0]?.url || entry?.thumbnail?.url || entry?.thumbnail || entry?.artwork_url || null,
-    requestedBy,
-    sourceLabel: overrides.sourceLabel || provider,
-    provider,
-    artist: overrides.artist || inferArtist(entry),
-    originalQuery: overrides.originalQuery || null,
-    normalizedFrom: overrides.normalizedFrom || null,
-  };
-}
-
-function buildSpotifySearchQuery(trackLike) {
-  const title = trackLike?.name || trackLike?.title || 'Unknown track';
-  const artist = trackLike?.artists?.map?.((artist) => artist.name).filter(Boolean).join(' ') || inferArtist(trackLike) || '';
-  return `${title} ${artist}`.trim();
-}
-
-async function searchYouTubeTracks(query, limit = 1) {
-  return play.search(query, {
-    limit,
-    source: {
-      youtube: 'video',
-    },
-  });
-}
-
-async function resolveSpotifyTrackToPlayableTrack(spotifyTrack, requestedBy, originalQuery) {
-  const searchQuery = buildSpotifySearchQuery(spotifyTrack);
-  const [youtubeResult] = await searchYouTubeTracks(searchQuery, 1);
-
-  if (!youtubeResult) {
-    throw new MusicError('Spotify metadata was found, but no playable YouTube match could be resolved for that track.');
-  }
-
-  return toTrackPayload(youtubeResult, requestedBy, {
-    sourceLabel: 'Spotify → YouTube',
-    provider: 'Spotify',
-    artist: spotifyTrack.artists?.map?.((artist) => artist.name).filter(Boolean).join(', ') || inferArtist(youtubeResult),
-    originalQuery,
-  });
-}
-
-async function resolveQueryToTracks(query, requestedBy) {
-  const rawInput = String(query || '').trim();
-  if (!rawInput) {
-    throw new MusicError('Provide a YouTube, YouTube Music, Spotify, or SoundCloud link, or a search query to play.');
-  }
-
-  const { normalized, providerLabel } = normalizeUrlInput(rawInput);
-  const validation = await play.validate(normalized);
-  const queryLooksLikeUrl = isLikelyUrl(rawInput);
-
-  try {
-    if (validation === 'yt_playlist') {
-      const playlist = await play.playlist_info(normalized, { incomplete: true });
-      const videos = await playlist.all_videos();
-      return videos.slice(0, MAX_PLAYLIST_TRACKS).map((video) => toTrackPayload(video, requestedBy, {
-        sourceLabel: providerLabel || 'YouTube',
-        originalQuery: rawInput,
-        normalizedFrom: providerLabel ? rawInput : null,
-      }));
-    }
-
-    if (validation === 'yt_video') {
-      const video = await play.video_basic_info(normalized);
-      return [toTrackPayload(video.video_details, requestedBy, {
-        sourceLabel: providerLabel || 'YouTube',
-        playbackUrl: normalized,
-        originalQuery: rawInput,
-        normalizedFrom: providerLabel ? rawInput : null,
-      })];
-    }
-
-    if (validation === 'sp_track') {
-      const spotifyTrack = await play.spotify(normalized);
-      return [await resolveSpotifyTrackToPlayableTrack(spotifyTrack, requestedBy, rawInput)];
-    }
-
-    if (validation === 'sp_album' || validation === 'sp_playlist') {
-      const spotifyCollection = await play.spotify(normalized);
-      const spotifyTracks = await spotifyCollection.all_tracks();
-      const playableTracks = [];
-
-      for (const spotifyTrack of spotifyTracks.slice(0, MAX_PLAYLIST_TRACKS)) {
-        try {
-          playableTracks.push(await resolveSpotifyTrackToPlayableTrack(spotifyTrack, requestedBy, rawInput));
-        } catch (error) {
-          logWarn(`Skipping unresolved Spotify track during collection import: ${spotifyTrack.name || spotifyTrack.title || 'Unknown track'}.`, error);
-        }
-      }
-
-      if (!playableTracks.length) {
-        throw new MusicError('Spotify metadata was loaded, but none of the collection tracks could be turned into playable sources.');
-      }
-
-      return playableTracks;
-    }
-
-    if (validation === 'so_track') {
-      const soundcloudTrack = await play.soundcloud(normalized);
-      return [toTrackPayload(soundcloudTrack, requestedBy, {
-        sourceLabel: 'SoundCloud',
-        playbackUrl: normalized,
-        originalQuery: rawInput,
-      })];
-    }
-
-    if (validation === 'so_playlist') {
-      const playlist = await play.soundcloud(normalized);
-      const tracks = await playlist.all_tracks();
-      return tracks.slice(0, MAX_PLAYLIST_TRACKS).map((track) => toTrackPayload(track, requestedBy, {
-        sourceLabel: 'SoundCloud',
-        originalQuery: rawInput,
-      }));
-    }
-
-    if (validation === false && queryLooksLikeUrl) {
-      const provider = providerLabelFromUrl(normalized);
-      if (provider === 'Spotify') {
-        throw new MusicError('Spotify links require valid Spotify API credentials before Serenity can resolve them.');
-      }
-      throw new MusicError('That link is unsupported or could not be recognized as a playable YouTube, YouTube Music, Spotify, or SoundCloud URL.');
-    }
-
-    const results = await searchYouTubeTracks(rawInput, 1);
-    if (!results.length) {
-      throw new MusicError('No playable results were found for that search query.');
-    }
-
-    return [toTrackPayload(results[0], requestedBy, {
-      sourceLabel: 'YouTube',
-      originalQuery: rawInput,
-    })];
-  } catch (error) {
-    if (error instanceof MusicError) {
-      throw error;
-    }
-
-    logWarn(`Source resolution failed for input: ${rawInput}`, error);
-    const message = String(error?.message || '').toLowerCase();
-
-    if (message.includes('spotify')) {
-      throw new MusicError('Spotify resolution failed. Check Spotify credentials or try using the track title directly.');
-    }
-
-    if (message.includes('soundcloud')) {
-      throw new MusicError('SoundCloud failed to resolve that track or playlist. Try another link or a plain search query.');
-    }
-
-    if (message.includes('youtube') || message.includes('video unavailable')) {
-      throw new MusicError('YouTube failed to resolve that input into a playable track. Try another URL or search phrase.');
-    }
-
-    throw new MusicError('The requested source could not be resolved into a playable track.');
-  }
-}
-
-async function createTrackResource(track, inlineVolume = 80) {
-  if (!track?.playbackUrl && !track?.url) {
-    throw new MusicError('The resolved track did not include a playable source URL.');
-  }
-
-  try {
-    const stream = await play.stream(track.playbackUrl || track.url);
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type || StreamType.Arbitrary,
-      inlineVolume: true,
-    });
-
-    if (resource.volume) {
-      resource.volume.setVolume(inlineVolume / 100);
-    }
-
-    return resource;
-  } catch (error) {
-    logWarn(`Stream creation failed for track: ${track.title}`, error);
-    const message = String(error?.message || '').toLowerCase();
-
-    if (error?.name === 'AbortError' || message.includes('aborted')) {
-      throw new MusicError('Failed to resolve a playable audio stream because the provider connection was interrupted. Please try again.');
-    }
-
-    if (message.includes('ffmpeg')) {
-      throw new MusicError('Playback could not start because FFmpeg or a required voice dependency is missing on the host.');
-    }
-
-    if (message.includes('sign in to confirm')) {
-      throw new MusicError('YouTube refused to serve that track without additional account verification.');
-    }
-
-    throw new MusicError('Failed to resolve a playable audio stream for that track.');
-  }
-}
-
-async function sendQueueWarning(queue, description) {
-  const guild = queue.guild;
-  if (!guild || !queue.textChannelId) return null;
-
-  const channel = await guild.channels.fetch(queue.textChannelId).catch(() => null);
-  if (!channel || typeof channel.send !== 'function') return null;
-
-  return channel.send({
-    embeds: [buildStateEmbed('Playback warning', description, 'warning')],
-  }).catch(() => null);
-}
-
-function bindQueueLifecycle(queue) {
-  if (queue.lifecycleBound) return;
-  queue.lifecycleBound = true;
-
-  queue.player.on(AudioPlayerStatus.Idle, async () => {
-    if (queue.isStarting) {
-      return;
-    }
-
-    try {
-      const previous = queue.currentTrack;
-
-      if (previous && queue.loopMode === LOOP_MODES.TRACK) {
-        queue.tracks.unshift({ ...previous });
-      } else if (previous && queue.loopMode === LOOP_MODES.QUEUE) {
-        queue.tracks.push({ ...previous });
-      }
-
-      setCurrentTrack(queue, null);
-      await processQueue(queue, { notifyOnSkip: true });
-    } catch (error) {
-      logWarn(`Queue idle transition failed for guild ${queue.guildId}.`, error);
-    }
-  });
-
-  queue.player.on('error', async (error) => {
-    logWarn(`Playback error in guild ${queue.guildId}.`, error);
-    queue.lastPlaybackError = error;
-
-    if (queue.isStarting) {
-      return;
-    }
-
-    setCurrentTrack(queue, null);
-    await sendQueueWarning(queue, 'Playback was interrupted, so Serenity skipped to the next playable track.');
-    await processQueue(queue, { notifyOnSkip: true });
-  });
-}
-
-async function connectToVoiceChannel(guild, voiceChannel, botMember) {
-  ensureConnectPermissions(voiceChannel, botMember);
-
-  try {
-    const connection = joinVoiceChannel({
-      channelId: voiceChannel.id,
-      guildId: guild.id,
-      adapterCreator: guild.voiceAdapterCreator,
-      selfDeaf: true,
-    });
-
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
-      try {
-        await Promise.race([
-          entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-          entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
-        ]);
-      } catch {
-        destroyQueue(guild.id);
-      }
-    });
-
-    await waitForConnectionReady(connection);
-    return connection;
-  } catch (error) {
-    logWarn(`Voice connection failed for guild ${guild.id}.`, error);
-    throw new MusicError('Failed to connect to your voice channel. Check that Serenity can join and speak there.', {
-      code: 'VOICE_CONNECT_FAILED',
-      cause: error,
-    });
-  }
-}
-
-function scheduleIdleCleanup(queue) {
-  setTimeout(() => {
-    const freshQueue = getGuildQueue(queue.guildId);
-    if (freshQueue && !freshQueue.currentTrack && !freshQueue.tracks.length) {
-      destroyQueue(queue.guildId);
-    }
-  }, MUSIC_IDLE_TIMEOUT_MS).unref?.();
-}
-
-function normalizePlaybackStartError(error) {
-  if (error instanceof MusicError) {
-    return error;
-  }
-
-  const message = String(error?.message || '').toLowerCase();
-  if (error?.name === 'AbortError' || message.includes('aborted')) {
-    return new MusicError('Discord voice aborted the stream before playback could start. This usually means the audio resource or host voice runtime is not healthy.');
-  }
-
-  if (message.includes('ffmpeg')) {
-    return new MusicError('Playback could not start because FFmpeg or another required voice runtime dependency is missing on the host.');
-  }
-
-  return new MusicError('The bot resolved a track, but Discord voice could not start playback for it.');
-}
-
-async function processQueue(queue, options = {}) {
-  if (queue.currentTrack || queue.isStarting) return queue.currentTrack;
-
-  while (peekNextTrack(queue)) {
-    const candidate = peekNextTrack(queue);
-    let failedTrack = null;
-
-    try {
-      const resource = await createTrackResource(candidate, queue.volume);
-      failedTrack = shiftNextTrack(queue) || candidate;
-      setCurrentTrack(queue, failedTrack);
-      queue.isStarting = true;
-      queue.player.play(resource);
-      await entersState(queue.player, AudioPlayerStatus.Playing, 15_000);
-      queue.isStarting = false;
-      return failedTrack;
-    } catch (error) {
-      queue.isStarting = false;
-      if (queue.currentTrack?.id === (failedTrack?.id || candidate.id)) {
-        setCurrentTrack(queue, null);
-      }
-      if (!failedTrack) {
-        failedTrack = shiftNextTrack(queue) || candidate;
-      }
-
-      const normalizedError = normalizePlaybackStartError(error);
-      queue.lastPlaybackError = normalizedError;
-      logWarn(`Skipping unplayable track in guild ${queue.guildId}: ${failedTrack.title}`, normalizedError);
-
-      if (options.notifyOnSkip) {
-        await sendQueueWarning(queue, `Skipped **${failedTrack.title}** because Discord voice could not start its stream.`);
-      }
-
-      if (options.failFast) {
-        if (!queue.tracks.length && !queue.currentTrack) {
-          destroyQueue(queue.guildId);
-        }
-        throw normalizedError;
-      }
-    }
-  }
-
-  scheduleIdleCleanup(queue);
-  return null;
-}
-
-async function ensureMusicSubsystem(client) {
-  if (musicBootstrapped) return;
-  musicBootstrapped = true;
-
-  try {
-    const report = generateDependencyReport();
-    logInfo(`Voice dependency report:\n${report}`);
-  } catch (error) {
-    logWarn('Could not generate voice dependency report.', error);
-  }
-
+async function configureSourceTokens() {
   try {
     const tokens = {};
 
     if (process.env.YOUTUBE_COOKIE) {
-      tokens.youtube = { cookie: process.env.YOUTUBE_COOKIE };
+      tokens.youtube = {
+        cookie: process.env.YOUTUBE_COOKIE,
+      };
     }
 
     if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
       tokens.spotify = {
         client_id: process.env.SPOTIFY_CLIENT_ID,
         client_secret: process.env.SPOTIFY_CLIENT_SECRET,
-        refresh_token: process.env.SPOTIFY_REFRESH_TOKEN || '',
+        refresh_token: process.env.SPOTIFY_REFRESH_TOKEN,
         market: process.env.SPOTIFY_MARKET || 'US',
       };
     }
@@ -534,12 +73,19 @@ async function ensureMusicSubsystem(client) {
     }
 
     if (Object.keys(tokens).length) {
-      await play.setToken(tokens);
+      await play.setToken(tokens).catch((error) => {
+        logWarn('Failed to configure one or more playback source tokens; music will continue with reduced provider support.', error);
+      });
     }
   } catch (error) {
-    logWarn('Source token bootstrap failed; continuing with best-effort provider support.', error);
+    logWarn('Source token bootstrap failed; continuing with best-effort defaults.', error);
   }
+}
 
+async function ensureMusicSubsystem(client) {
+  if (musicBootstrapped) return;
+  musicBootstrapped = true;
+  await configureSourceTokens();
   client.musicSubsystemReady = true;
   logInfo('Music subsystem initialized.');
 }
@@ -580,6 +126,225 @@ function ensureConnectPermissions(channel, botMember) {
   }
 }
 
+function toTrackPayload(entry, requestedBy) {
+  return {
+    id: entry.id || entry.url || `${Date.now()}-${Math.random()}`,
+    title: entry.title || 'Unknown track',
+    url: entry.url || entry.permalink || entry.href || null,
+    durationMs: entry.durationInSec ? entry.durationInSec * 1000 : entry.durationRaw ? parseDurationRaw(entry.durationRaw) : entry.duration || 0,
+    thumbnail: entry.thumbnails?.[0]?.url || entry.thumbnail?.url || entry.thumbnail || entry.artwork_url || null,
+    requestedBy,
+    sourceLabel: inferSourceLabel(entry),
+    provider: inferSourceLabel(entry),
+    artist: entry.channel?.name || entry.artist?.name || entry.channel || entry.user?.name || null,
+  };
+}
+
+function parseDurationRaw(raw) {
+  if (!raw || typeof raw !== 'string') return 0;
+  const parts = raw.split(':').map((part) => Number(part));
+  if (parts.some((part) => !Number.isFinite(part))) return 0;
+  let seconds = 0;
+  while (parts.length) {
+    seconds = (seconds * 60) + parts.shift();
+  }
+  return seconds * 1000;
+}
+
+function inferSourceLabel(entry) {
+  const url = String(entry?.url || entry?.permalink || '').toLowerCase();
+  if (url.includes('spotify.com')) return 'Spotify';
+  if (url.includes('soundcloud.com')) return 'SoundCloud';
+  if (url.includes('youtube.com') || url.includes('youtu.be')) return 'YouTube';
+  if (entry?.source) return String(entry.source);
+  return 'Search';
+}
+
+async function resolveQueryToTracks(query, requestedBy) {
+  const input = String(query || '').trim();
+  if (!input) {
+    throw new MusicError('Provide a YouTube/Spotify/SoundCloud link or a search query to play.');
+  }
+
+  try {
+    const validation = play.validate(input);
+
+    if (validation === 'yt_playlist') {
+      const playlist = await play.playlist_info(input, { incomplete: true });
+      const videos = await playlist.all_videos();
+      return videos.slice(0, 50).map((video) => toTrackPayload(video, requestedBy));
+    }
+
+    if (validation === 'yt_video') {
+      const video = await play.video_info(input);
+      return [toTrackPayload(video.video_details, requestedBy)];
+    }
+
+    if (validation === 'sp_track') {
+      const spotifyTrack = await play.spotify(input);
+      const queryText = `${spotifyTrack.name} ${spotifyTrack.artists?.map((artist) => artist.name).join(' ') || ''}`.trim();
+      const results = await play.search(queryText, { limit: 1, source: { youtube: 'video' } });
+      if (!results.length) throw new MusicError('Spotify track metadata loaded, but no playable source was found on YouTube.');
+      return [{
+        ...toTrackPayload(results[0], requestedBy),
+        sourceLabel: 'Spotify → YouTube',
+        provider: 'Spotify',
+      }];
+    }
+
+    if (validation === 'sp_album' || validation === 'sp_playlist') {
+      const spotifyList = await play.spotify(input);
+      const spotifyTracks = await spotifyList.all_tracks();
+      const limitedTracks = spotifyTracks.slice(0, 50);
+      const resolved = [];
+
+      for (const spotifyTrack of limitedTracks) {
+        const queryText = `${spotifyTrack.name} ${spotifyTrack.artists?.map((artist) => artist.name).join(' ') || ''}`.trim();
+        const [result] = await play.search(queryText, { limit: 1, source: { youtube: 'video' } });
+        if (result) {
+          resolved.push({
+            ...toTrackPayload(result, requestedBy),
+            sourceLabel: 'Spotify → YouTube',
+            provider: 'Spotify',
+          });
+        }
+      }
+
+      if (!resolved.length) {
+        throw new MusicError('Spotify playlist metadata loaded, but none of the tracks could be resolved into playable sources.');
+      }
+
+      return resolved;
+    }
+
+    if (validation === 'so_track') {
+      const info = await play.soundcloud(input);
+      return [toTrackPayload(info, requestedBy)];
+    }
+
+    if (validation === 'so_playlist') {
+      const playlist = await play.soundcloud(input);
+      const tracks = await playlist.all_tracks();
+      return tracks.slice(0, 50).map((track) => toTrackPayload(track, requestedBy));
+    }
+
+    const [result] = await play.search(input, { limit: 1, source: { youtube: 'video', soundcloud: 'tracks' } });
+    if (!result) {
+      throw new MusicError('No playable results were found for that query.');
+    }
+
+    return [toTrackPayload(result, requestedBy)];
+  } catch (error) {
+    if (error instanceof MusicError) throw error;
+
+    const message = String(error?.message || 'Unknown provider error');
+    if (message.toLowerCase().includes('spotify')) {
+      throw new MusicError('Spotify resolution failed. Check your Spotify credentials or try the track title directly.');
+    }
+    if (message.toLowerCase().includes('soundcloud')) {
+      throw new MusicError('SoundCloud lookup failed for that input. Try another track, playlist, or plain search query.');
+    }
+    if (message.toLowerCase().includes('youtube')) {
+      throw new MusicError('YouTube lookup failed for that input. Try another URL or search phrase.');
+    }
+    throw new MusicError('That source could not be resolved into a playable track right now.');
+  }
+}
+
+async function createTrackResource(track, inlineVolume = 80) {
+  if (!track?.url) {
+    throw new MusicError('The resolved track did not include a playable URL.');
+  }
+
+  const stream = await play.stream(track.url, {
+    quality: 2,
+    discordPlayerCompatibility: true,
+  });
+
+  const resource = createAudioResource(stream.stream, {
+    inputType: stream.type || StreamType.Arbitrary,
+    inlineVolume: true,
+  });
+
+  if (resource.volume) {
+    resource.volume.setVolume(inlineVolume / 100);
+  }
+
+  return resource;
+}
+
+function bindQueueLifecycle(queue) {
+  if (queue.lifecycleBound) return;
+  queue.lifecycleBound = true;
+
+  queue.player.on(AudioPlayerStatus.Idle, async () => {
+    try {
+      const previous = queue.currentTrack;
+
+      if (previous && queue.loopMode === LOOP_MODES.TRACK) {
+        queue.tracks.unshift(previous);
+      } else if (previous && queue.loopMode === LOOP_MODES.QUEUE) {
+        queue.tracks.push(previous);
+      }
+
+      setCurrentTrack(queue, null);
+      await processQueue(queue);
+    } catch (error) {
+      logWarn(`Queue idle transition failed for guild ${queue.guildId}.`, error);
+    }
+  });
+
+  queue.player.on('error', async (error) => {
+    logWarn(`Playback error in guild ${queue.guildId}. Skipping current track.`, error);
+    setCurrentTrack(queue, null);
+    await processQueue(queue);
+  });
+}
+
+async function connectToVoiceChannel(guild, voiceChannel, botMember) {
+  ensureConnectPermissions(voiceChannel, botMember);
+  const connection = joinVoiceChannel({
+    channelId: voiceChannel.id,
+    guildId: guild.id,
+    adapterCreator: guild.voiceAdapterCreator,
+    selfDeaf: true,
+  });
+
+  connection.on(VoiceConnectionStatus.Disconnected, async () => {
+    try {
+      await Promise.race([
+        entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+        entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+      ]);
+    } catch {
+      destroyQueue(guild.id);
+    }
+  });
+
+  await waitForConnectionReady(connection);
+  return connection;
+}
+
+async function processQueue(queue) {
+  if (queue.currentTrack) return queue.currentTrack;
+
+  const nextTrack = queue.tracks.shift() || null;
+  if (!nextTrack) {
+    setTimeout(() => {
+      const freshQueue = getGuildQueue(queue.guildId);
+      if (freshQueue && !freshQueue.currentTrack && !freshQueue.tracks.length) {
+        destroyQueue(queue.guildId);
+      }
+    }, MUSIC_IDLE_TIMEOUT_MS).unref?.();
+    return null;
+  }
+
+  const resource = await createTrackResource(nextTrack, queue.volume);
+  setCurrentTrack(queue, nextTrack);
+  queue.player.play(resource);
+  return nextTrack;
+}
+
 async function ensureQueueForRequest(source) {
   ensureGuildContext(source);
   const member = getMemberFromSource(source);
@@ -615,24 +380,20 @@ async function ensureQueueForRequest(source) {
 async function playCommand(source, query) {
   const { queue, actor } = await ensureQueueForRequest(source);
   const tracks = await resolveQueryToTracks(query, actor);
-  const shouldStartImmediately = !queue.currentTrack;
+  const shouldStart = !queue.currentTrack;
   const queuedTracks = enqueueTracks(queue, tracks);
 
-  if (shouldStartImmediately) {
-    await processQueue(queue, { failFast: true });
+  if (shouldStart) {
+    await processQueue(queue);
   }
 
-  if (!queue.currentTrack && !queue.tracks.length) {
-    throw new MusicError('Playback could not start because no playable audio streams were available from that request.');
-  }
-
-  const previewTrack = shouldStartImmediately ? queue.currentTrack : queuedTracks[0];
+  const previewTrack = shouldStart ? queue.currentTrack : queuedTracks[0];
   return {
     embeds: [buildPlayEmbed({
       track: previewTrack,
       queueLength: getQueueSize(queue),
       addedCount: queuedTracks.length,
-      started: shouldStartImmediately,
+      started: shouldStart,
     })],
   };
 }

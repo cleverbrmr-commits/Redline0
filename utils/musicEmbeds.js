@@ -19,20 +19,15 @@ function formatRequester(user) {
   return user.toString ? user.toString() : `**${trimText(user.username || 'Unknown requester', 80)}**`;
 }
 
-function formatArtist(track) {
-  return trimText(track.artist || 'Unknown artist / uploader', 80);
-}
-
 function formatTrackLine(track, index) {
-  return `**${index}.** [${trimText(track.title, 70)}](${track.url})\n┗ ${formatArtist(track)} • \`${formatDuration(track.durationMs)}\` • ${trimText(track.sourceLabel || 'Unknown', 24)} • ${formatRequester(track.requestedBy)}`;
+  return `**${index}.** [${trimText(track.title, 70)}](${track.url}) • \`${formatDuration(track.durationMs)}\` • ${trimText(track.sourceLabel || 'Unknown', 24)} • ${formatRequester(track.requestedBy)}`;
 }
 
 function buildTrackFields(track, extraFields = []) {
   return [
-    { name: 'Artist / Uploader', value: formatArtist(track), inline: true },
     { name: 'Duration', value: formatDuration(track.durationMs), inline: true },
-    { name: 'Requested By', value: formatRequester(track.requestedBy), inline: true },
     { name: 'Source', value: track.sourceLabel || 'Unknown', inline: true },
+    { name: 'Requested By', value: formatRequester(track.requestedBy), inline: true },
     ...(track.positionText ? [{ name: 'Queue Position', value: track.positionText, inline: true }] : []),
     ...extraFields,
   ];
@@ -100,11 +95,11 @@ function buildQueueEmbed(queue, page = 1) {
 
   const description = [
     queue.currentTrack
-      ? `**Now:** [${trimText(queue.currentTrack.title, 90)}](${queue.currentTrack.url})\n┗ ${formatArtist(queue.currentTrack)} • \`${formatDuration(queue.currentTrack.durationMs)}\` • ${formatRequester(queue.currentTrack.requestedBy)}`
+      ? `**Now:** [${trimText(queue.currentTrack.title, 90)}](${queue.currentTrack.url}) • \`${formatDuration(queue.currentTrack.durationMs)}\` • ${formatRequester(queue.currentTrack.requestedBy)}`
       : '**Now:** Nothing playing',
     '',
     visibleTracks.length
-      ? visibleTracks.map((track, index) => formatTrackLine(track, startIndex + index + 2)).join('\n\n')
+      ? visibleTracks.map((track, index) => formatTrackLine(track, startIndex + index + 2)).join('\n')
       : '*No additional tracks on this page.*',
   ].join('\n');
 

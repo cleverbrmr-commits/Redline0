@@ -125,7 +125,6 @@ Music playback is implemented with `play-dl` plus `@discordjs/voice`.
 Practical support includes:
 
 - YouTube links
-- YouTube Music watch/playlist links normalized into standard YouTube URLs where possible
 - YouTube search queries
 - Spotify track links
 - Spotify album / playlist links resolved best-effort into playable YouTube matches
@@ -170,7 +169,7 @@ The centralized prefix trigger remains the bot name, so music works alongside th
 - Users must be in a voice channel before starting playback or using queue controls.
 - Control commands require the user to be in the same voice channel as Serenity.
 - Serenity joins the invoker’s voice channel automatically when playback begins.
-- Empty queues, invalid URLs, unsupported links, provider failures, and missing permissions return clean command errors instead of crashing the bot.
+- Empty queues, invalid URLs, provider failures, and missing permissions return clean command errors instead of crashing the bot.
 - Long queues are safely truncated into paginated queue views.
 - `/help` automatically includes the music commands because they are registered through shared command metadata.
 
@@ -179,18 +178,10 @@ The centralized prefix trigger remains the bot name, so music works alongside th
 Install these runtime dependencies:
 
 ```bash
-npm install @discordjs/voice play-dl libsodium-wrappers opusscript
+npm install @discordjs/voice play-dl
 ```
 
-Depending on your host environment, Discord voice may also need one of the encryption/voice runtime dependencies documented by `@discordjs/voice`. Serenity now declares `libsodium-wrappers` and `opusscript` to improve Railway/container compatibility, and it logs a voice dependency report at startup to help diagnose missing host requirements.
-
-### Provider notes / limitations
-
-- YouTube Music links are normalized into standard YouTube watch or playlist URLs when possible.
-- Spotify is used as a metadata source and is resolved into playable YouTube matches inside Serenity's queue flow.
-- Spotify collection imports are best-effort: tracks that cannot be matched are skipped instead of crashing the queue.
-- Some YouTube videos may still fail if YouTube requires cookies, account verification, or region-specific access; set `YOUTUBE_COOKIE` if needed.
-- If Railway still reports voice aborts, inspect the startup dependency report first: missing/unsupported voice runtime pieces can prevent `@discordjs/voice` from reaching a stable `Playing` state even after a track resolves successfully.
+Depending on your host environment, Discord voice may also benefit from optional native/FFmpeg acceleration packages documented by `@discordjs/voice`.
 
 ## Prefix commands
 
