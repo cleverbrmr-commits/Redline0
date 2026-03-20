@@ -61,6 +61,10 @@ function normalizeErrorMessage(message) {
     return 'Discord no longer accepted that response. Please try the command again.';
   }
 
+  if (value.includes('The operation was aborted') || value.includes('operation was aborted') || value.includes('AbortError')) {
+    return 'The provider connection was interrupted before the bot could finish the request.';
+  }
+
   if (value.includes('Missing Access') || value.includes('Missing Permissions')) {
     return 'The bot is missing the required Discord permissions for that action.';
   }
