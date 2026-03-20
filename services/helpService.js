@@ -1,4 +1,5 @@
 const { makeEmbed, makeInfoEmbed, makeWarningEmbed } = require('../utils/embeds');
+const { trimText } = require('../utils/helpers');
 
 const FIELD_LIMIT = 1024;
 const SAFE_FIELD_LIMIT = 900;
@@ -6,9 +7,7 @@ const EMBED_DESCRIPTION_LIMIT = 4096;
 const MAX_FIELDS_PER_EMBED = 6;
 
 function trim(text, max) {
-  const value = String(text ?? '');
-  if (value.length <= max) return value;
-  return `${value.slice(0, Math.max(0, max - 3))}...`;
+  return trimText(text, max);
 }
 
 function toTitleCase(value) {
@@ -94,15 +93,6 @@ function getCommandPrefixUsage(command, prefixName) {
   return supportsPrefix(command) ? `${prefixName} ${getCommandName(command)}` : 'Not supported';
 }
 
-
-function formatCommandList(value) {
-  return String(value || '')
-    .split('\n')
-    .filter(Boolean)
-    .map((entry) => `• \`${trim(entry, 120)}\``)
-    .join('\n') || 'None';
-}
-
 function getCommandPermissions(command) {
   const permissions = command?.permissions || getMeta(command).permissions || command?.defaultMemberPermissions || null;
   if (!permissions) return 'Everyone';
@@ -181,9 +171,9 @@ function groupCommandsByCategory(commands) {
 
 function formatOverviewLine(command) {
   const slash = `/${getCommandName(command)}`;
-  const usage = trim(getCommandUsage(command).split('\n')[0], 80);
-  const description = trim(getCommandDescription(command), 120);
-  return `**${slash}** — ${description}\nUsage: \`${usage}\``;
+  const description = trim(getCommandDescription(command), 110);
+  const prefixBadge = supportsPrefix(command) ? ' • Prefix' : '';
+  return `**${slash}**${prefixBadge}\n${description}`;
 }
 
 function buildHelpOverviewEmbeds(commandRegistry, prefixName = 'Serenity') {
@@ -215,18 +205,18 @@ function buildHelpOverviewEmbeds(commandRegistry, prefixName = 'Serenity') {
   }
 
   const embeds = [];
-  for (let i = 0; i < fieldQueue.length; i += MAX_FIELDS_PER_EMBED) {
-    const fields = fieldQueue.slice(i, i + MAX_FIELDS_PER_EMBED);
-
+  for (let index = 0; index < fieldQueue.length; index += MAX_FIELDS_PER_EMBED) {
+    const fields = fieldQueue.slice(index, index + MAX_FIELDS_PER_EMBED);
     embeds.push(makeEmbed({
-      title: i === 0 ? 'Help Menu' : 'Help Menu (cont.)',
-      description: i === 0
+      title: index === 0 ? 'Redline Help Desk' : 'Redline Help Desk (cont.)',
+      description: index === 0
         ? trim(
-          `Use \`/help command:<name>\` for detailed help on one command. Prefix commands can be used like \`${prefixName} help ban\` where supported.`,
+          `Browse commands by category below. Use \`/help command:<name>\` for detail cards, or \`${prefixName} help <command>\` where prefix support is available.`,
           EMBED_DESCRIPTION_LIMIT,
         )
-        : undefined,
+        : 'More commands from the current runtime registry.',
       fields,
+      footer: `REDLINE • ${commands.length} command${commands.length === 1 ? '' : 's'} loaded`,
     }));
   }
 
@@ -245,32 +235,34 @@ function buildHelpCommandEmbed(commandRegistry, query, prefixName = 'Serenity') 
 
   const name = getCommandName(command);
   const description = trim(getCommandDescription(command), EMBED_DESCRIPTION_LIMIT);
-  const usage = getCommandUsage(command);
+  const usage = getCommandUsage(command)
+    .split('\n')
+    .filter(Boolean)
+    .map((entry) => `• \`${trim(entry, 140)}\``)
+    .join('\n') || 'None';
   const examples = getCommandExamples(command)
     .filter(Boolean)
-    .map((example) => `• \`${trim(example, 120)}\``)
+    .map((example) => `• \`${trim(example, 140)}\``)
     .join('\n') || 'None';
   const aliases = command?.aliases || getMeta(command).aliases || [];
-  const slashUsage = `/${name}`;
   const prefixUsage = getCommandPrefixUsage(command, prefixName);
   const permissions = trim(getCommandPermissions(command), FIELD_LIMIT);
+  const responseMode = String(getMeta(command).response || 'public');
 
   return makeInfoEmbed({
     title: `Help • /${name}`,
     description,
     fields: [
       { name: 'Category', value: toTitleCase(getCommandCategory(command)), inline: true },
+      { name: 'Response', value: toTitleCase(responseMode), inline: true },
       { name: 'Permissions', value: permissions, inline: true },
-      { name: 'Slash Usage', value: `\`${slashUsage}\``, inline: false },
-      { name: 'Prefix Usage', value: formatCommandList(prefixUsage), inline: false },
-      { name: 'Full Usage', value: formatCommandList(usage), inline: false },
-      {
-        name: 'Aliases',
-        value: aliases.length ? aliases.map((alias) => `\`${alias}\``).join(', ') : 'None',
-        inline: false,
-      },
-      { name: 'Examples', value: trim(examples, FIELD_LIMIT), inline: false },
+      { name: 'Slash Usage', value: `• \`/${name}\``, inline: false },
+      { name: 'Full Usage', value: usage, inline: false },
+      { name: 'Prefix Usage', value: supportsPrefix(command) ? prefixUsage.split('\n').map((entry) => `• \`${trim(entry, 140)}\``).join('\n') : 'Not supported', inline: false },
+      { name: 'Examples', value: examples, inline: false },
+      { name: 'Aliases', value: aliases.length ? aliases.map((alias) => `\`${alias}\``).join(', ') : 'None', inline: false },
     ],
+    footer: `REDLINE • ${supportsPrefix(command) ? 'Slash + prefix ready' : 'Slash only'}`,
   });
 }
 

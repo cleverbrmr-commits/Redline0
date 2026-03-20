@@ -74,7 +74,7 @@ function createDiscordClient() {
 }
 
 function attachHandlers(client, commandRegistry) {
-  client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry));
+  client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry, PREFIX_NAME));
   client.on(Events.MessageCreate, createMessageHandler(client, commandRegistry, PREFIX_NAME));
   client.on(Events.GuildMemberAdd, createGuildMemberAddHandler(client));
 }

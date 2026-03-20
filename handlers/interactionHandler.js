@@ -3,6 +3,8 @@ const { handleButton, handleStringSelect } = require('../services/panelService')
 const { makeWarningEmbed } = require('../utils/embeds');
 const { prettyError } = require('../utils/helpers');
 
+const AUTO_DEFER_DELAY_MS = 1500;
+
 function buildCommandRegistry(commandModules) {
   const commands = commandModules.flatMap((entry) => entry.commands || []);
   const registry = new Map();
@@ -54,13 +56,69 @@ async function ensureInteractionAcknowledged(interaction, label) {
   return false;
 }
 
-function createInteractionHandler(client, commandRegistry) {
+function shouldAutoDeferEphemeral(command) {
+  const responseMode = String(command?.metadata?.response || command?.response || '').toLowerCase();
+  return responseMode.includes('ephemeral');
+}
+
+function normalizeDeferredPayload(payload = {}) {
+  const nextPayload = { ...payload };
+  delete nextPayload.ephemeral;
+  return nextPayload;
+}
+
+function createInteractionFacade(interaction) {
+  const reply = interaction.reply.bind(interaction);
+  const editReply = interaction.editReply.bind(interaction);
+  const followUp = interaction.followUp.bind(interaction);
+  const deferReply = interaction.deferReply.bind(interaction);
+
+  const facade = Object.create(interaction);
+  facade.reply = async (payload = {}) => {
+    if (interaction.deferred && !interaction.replied) {
+      return editReply(normalizeDeferredPayload(payload));
+    }
+
+    if (interaction.replied) {
+      return followUp(payload);
+    }
+
+    return reply(payload);
+  };
+  facade.editReply = async (payload = {}) => editReply(normalizeDeferredPayload(payload));
+  facade.followUp = async (payload = {}) => followUp(payload);
+  facade.deferReply = async (payload = {}) => deferReply(payload);
+
+  return facade;
+}
+
+async function executeSlashCommand({ client, interaction, command, commandRegistry, prefixName }) {
+  const interactionFacade = createInteractionFacade(interaction);
+  const autoDeferTimer = setTimeout(() => {
+    if (!interaction.deferred && !interaction.replied) {
+      interaction.deferReply({ ephemeral: shouldAutoDeferEphemeral(command) }).catch(() => null);
+    }
+  }, AUTO_DEFER_DELAY_MS);
+
+  try {
+    await command.execute({
+      client,
+      interaction: interactionFacade,
+      commandRegistry,
+      prefixName,
+    });
+  } finally {
+    clearTimeout(autoDeferTimer);
+  }
+}
+
+function createInteractionHandler(client, commandRegistry, prefixName) {
   return async function onInteraction(interaction) {
     try {
       if (interaction.isAutocomplete()) {
         const command = commandRegistry.get(interaction.commandName);
         if (command?.autocomplete) {
-          return await command.autocomplete({ client, interaction, commandRegistry });
+          return await command.autocomplete({ client, interaction, commandRegistry, prefixName });
         }
 
         return interaction.respond([]);
@@ -82,7 +140,7 @@ function createInteractionHandler(client, commandRegistry) {
           return false;
         }
 
-        await command.execute({ client, interaction, commandRegistry });
+        await executeSlashCommand({ client, interaction, command, commandRegistry, prefixName });
         await ensureInteractionAcknowledged(interaction, `slash command "${interaction.commandName}"`);
         return true;
       }
@@ -153,6 +211,7 @@ function createInteractionHandler(client, commandRegistry) {
 }
 
 module.exports = {
+  AUTO_DEFER_DELAY_MS,
   Events,
   buildCommandRegistry,
   createInteractionHandler,

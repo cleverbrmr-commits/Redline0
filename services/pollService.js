@@ -45,15 +45,28 @@ function validatePollPayload(question, options) {
 }
 
 function buildPollLines(options) {
-  return options.map((option, index) => `${POLL_OPTION_EMOJIS[index]} ${option}`);
+  return options.map((option, index) => `${POLL_OPTION_EMOJIS[index]} **${String.fromCharCode(65 + index)}** • ${option}`);
+}
+
+function buildChoiceGrid(options) {
+  return options.map((option, index) => `${POLL_OPTION_EMOJIS[index]} ${trimText(option, 80)}`).join('\n');
 }
 
 function buildPollEmbed({ question, options, authorTag }) {
   return makeEmbed({
     title: `Poll • ${question}`,
-    description: buildPollLines(options).join('\n'),
-    color: Colors.Red,
-    fields: authorTag ? [{ name: 'Created By', value: authorTag, inline: true }] : [],
+    description: 'React below to cast your vote. Results update live as reactions come in.',
+    color: Colors.Blurple,
+    author: {
+      name: 'Redline Community Poll',
+    },
+    fields: [
+      { name: 'Question', value: trimText(question, 1024), inline: false },
+      { name: 'Choices', value: buildChoiceGrid(options), inline: false },
+      { name: 'Mode', value: 'Single message • Reaction voting', inline: true },
+      { name: 'Options', value: String(options.length), inline: true },
+      { name: 'Created By', value: authorTag || 'Unknown', inline: true },
+    ],
     footer: 'REDLINE • Reaction poll',
     timestamp: true,
   });
@@ -67,8 +80,8 @@ function buildPollMessagePayload({ mode, question, options, authorTag }) {
   if (normalizedMode === POLL_MODES.normal) {
     return {
       content: [
-        `**Poll • ${validated.question}**`,
-        authorTag ? `Created by ${authorTag}` : null,
+        `## Poll • ${validated.question}`,
+        authorTag ? `Started by ${authorTag}` : null,
         '',
         ...optionLines,
       ].filter((line) => line !== null).join('\n'),
@@ -139,12 +152,25 @@ function buildPollValidationEmbed(message) {
 function buildPollUsageEmbed(prefixName = 'Serenity') {
   return makeInfoEmbed({
     title: 'Poll usage',
-    description: [
-      `• \`/poll embed question option1 option2 [option3...]\``,
-      `• \`/poll normal question option1 option2 [option3...]\``,
-      `• \`${prefixName} poll embed Best client? | Volt | Apex | Nova\``,
-      `• \`${prefixName} poll normal Favorite mode? | Survival | PvP | Skyblock\``,
-    ].join('\n'),
+    description: 'Create a quick reaction poll in either clean embed mode or lightweight text mode.',
+    fields: [
+      {
+        name: 'Slash',
+        value: [
+          '• `/poll embed question option1 option2 [option3...]`',
+          '• `/poll normal question option1 option2 [option3...]`',
+        ].join('\n'),
+        inline: false,
+      },
+      {
+        name: 'Prefix',
+        value: [
+          `• \`${prefixName} poll embed Best client? | Volt | Apex | Nova\``,
+          `• \`${prefixName} poll normal Favorite mode? | Survival | PvP | Skyblock\``,
+        ].join('\n'),
+        inline: false,
+      },
+    ],
     footer: 'REDLINE • Reaction poll',
   });
 }

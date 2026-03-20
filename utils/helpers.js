@@ -1,24 +1,24 @@
-const path = require("path");
-const { AttachmentBuilder, Colors } = require("discord.js");
+const path = require('path');
+const { AttachmentBuilder, Colors } = require('discord.js');
 
-const CATEGORY_OPTIONS = ["Utility", "PvP", "Visual", "Performance", "Beta"];
-const VISIBILITY_OPTIONS = ["public", "hidden"];
-const STATUS_OPTIONS = ["Stable", "Testing", "Deprecated", "Hotfix"];
-const SETTING_KEYS = ["downloadlog", "modlog", "prisonlog", "announcelog"];
+const CATEGORY_OPTIONS = ['Utility', 'PvP', 'Visual', 'Performance', 'Beta'];
+const VISIBILITY_OPTIONS = ['public', 'hidden'];
+const STATUS_OPTIONS = ['Stable', 'Testing', 'Deprecated', 'Hotfix'];
+const SETTING_KEYS = ['downloadlog', 'modlog', 'prisonlog', 'announcelog'];
 const SETTING_MAP = {
-  downloadlog: "downloadLogChannelId",
-  modlog: "modLogChannelId",
-  prisonlog: "prisonLogChannelId",
-  announcelog: "announceLogChannelId",
+  downloadlog: 'downloadLogChannelId',
+  modlog: 'modLogChannelId',
+  prisonlog: 'prisonLogChannelId',
+  announcelog: 'announceLogChannelId',
 };
-const PRISON_ROLE_NAME = "Prisoner";
+const PRISON_ROLE_NAME = 'Prisoner';
 const DOWNLOAD_COOLDOWN_MS = 8000;
 const MAX_MENU_OPTIONS = 25;
 
 const BRAND = {
-  name: "REDLINE CLIENT HUB",
-  footer: "REDLINE • Clean drops. Fast access.",
-  emojiPool: ["🔥", "⚡", "🩸", "🧨", "🚀", "🛠️"],
+  name: 'REDLINE CLIENT HUB',
+  footer: 'REDLINE • Clean drops. Fast access.',
+  emojiPool: ['🔥', '⚡', '🩸', '🧨', '🚀', '🛠️'],
   colors: [
     Colors.Red,
     Colors.DarkRed,
@@ -41,6 +41,37 @@ function brandEmoji() {
   return pick(BRAND.emojiPool);
 }
 
+function trimText(str, max = 100) {
+  const text = String(str || '');
+  return text.length > max ? `${text.slice(0, Math.max(0, max - 1))}…` : text;
+}
+
+function normalizeErrorMessage(message) {
+  const value = String(message || '').trim();
+
+  if (!value) {
+    return 'Something went wrong.';
+  }
+
+  if (value === 'Received one or more errors' || value.includes('Invalid Form Body')) {
+    return 'A response could not be sent because some content was not valid for Discord.';
+  }
+
+  if (value.includes('Unknown interaction')) {
+    return 'Discord no longer accepted that response. Please try the command again.';
+  }
+
+  if (value.includes('Missing Access') || value.includes('Missing Permissions')) {
+    return 'The bot is missing the required Discord permissions for that action.';
+  }
+
+  if (value.includes('Cannot send messages to this user')) {
+    return 'Discord blocked that delivery target.';
+  }
+
+  return trimText(value, 500);
+}
+
 function prettyError(err) {
   const errorName = String(err?.name || '');
   const errorMessage = String(err?.message || '').trim();
@@ -49,58 +80,49 @@ function prettyError(err) {
     return 'A response payload could not be rendered correctly. Check the bot logs for the detailed validation error.';
   }
 
-  if (errorMessage === 'Received one or more errors') {
-    return 'A response payload could not be rendered correctly. Check the bot logs for the detailed validation error.';
-  }
-
   if (Array.isArray(err?.errors) && err.errors.length) {
     const messages = err.errors
       .map((entry) => entry?.message || entry)
       .filter(Boolean)
-      .map((entry) => String(entry).trim());
+      .map((entry) => normalizeErrorMessage(entry));
 
     if (messages.length) {
-      return trimText(messages.join(" • "), 500);
+      return trimText(messages.join(' • '), 500);
     }
   }
 
-  return err?.message || "Something went wrong.";
+  return normalizeErrorMessage(errorMessage || err?.rawError?.message || err?.code || 'Something went wrong.');
 }
 
 function validateEnv() {
-  const required = ["DISCORD_TOKEN", "CLIENT_ID", "GUILD_ID"];
+  const required = ['DISCORD_TOKEN', 'CLIENT_ID', 'GUILD_ID'];
   const missing = required.filter((key) => !process.env[key]);
 
   if (missing.length) {
-    throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
+    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
 }
 
 function slugify(input) {
-  return String(input || "")
+  return String(input || '')
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-+/g, "-");
-}
-
-function trimText(str, max = 100) {
-  const text = String(str || "");
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-+/g, '-');
 }
 
 function normalizeCategory(value) {
-  return CATEGORY_OPTIONS.find((entry) => entry.toLowerCase() === String(value || "").toLowerCase()) || "Utility";
+  return CATEGORY_OPTIONS.find((entry) => entry.toLowerCase() === String(value || '').toLowerCase()) || 'Utility';
 }
 
 function normalizeVisibility(value) {
-  const found = VISIBILITY_OPTIONS.find((entry) => entry === String(value || "").toLowerCase());
-  return found || "public";
+  const found = VISIBILITY_OPTIONS.find((entry) => entry === String(value || '').toLowerCase());
+  return found || 'public';
 }
 
 function normalizeStatus(value) {
-  return STATUS_OPTIONS.find((entry) => entry.toLowerCase() === String(value || "").toLowerCase()) || "Stable";
+  return STATUS_OPTIONS.find((entry) => entry.toLowerCase() === String(value || '').toLowerCase()) || 'Stable';
 }
 
 function parseRoleId(raw) {
@@ -110,16 +132,16 @@ function parseRoleId(raw) {
 }
 
 function formatRoleMention(roleId) {
-  return roleId ? `<@&${roleId}>` : "Everyone eligible";
+  return roleId ? `<@&${roleId}>` : 'Everyone eligible';
 }
 
-function sanitizeFileName(name, fallback = "file") {
+function sanitizeFileName(name, fallback = 'file') {
   const basename = path.basename(String(name || fallback));
   const sanitized = basename
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/\.{2,}/g, ".")
-    .replace(/^\.+/, "");
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^\.+/, '');
 
   return sanitized || fallback;
 }
@@ -148,10 +170,10 @@ function resolveModulePath(mod, uploadsDir) {
   return null;
 }
 
-function getStoredFileNameForKey(key, originalName, fallbackExt = ".jar") {
-  const safeKey = slugify(key) || "client";
+function getStoredFileNameForKey(key, originalName, fallbackExt = '.jar') {
+  const safeKey = slugify(key) || 'client';
   const safeOriginalName = sanitizeFileName(originalName || `client${fallbackExt}`);
-  const ext = path.extname(safeOriginalName).replace(/[^a-zA-Z0-9.]/g, "") || fallbackExt;
+  const ext = path.extname(safeOriginalName).replace(/[^a-zA-Z0-9.]/g, '') || fallbackExt;
   return `${safeKey}${ext.toLowerCase()}`;
 }
 
@@ -171,12 +193,12 @@ async function resolveInteractionContext(client, interaction) {
 async function resolveSendableChannel(client, channelId, fallbackChannel = null) {
   if (!channelId) return null;
   const channel = fallbackChannel?.id === channelId ? fallbackChannel : await client.channels.fetch(channelId).catch(() => null);
-  if (!channel || typeof channel.send !== "function") return null;
+  if (!channel || typeof channel.send !== 'function') return null;
   return channel;
 }
 
 module.exports = {
-  BACKUP_FILE_PREFIX: "backup",
+  BACKUP_FILE_PREFIX: 'backup',
   BRAND,
   CATEGORY_OPTIONS,
   DOWNLOAD_COOLDOWN_MS,
@@ -192,6 +214,7 @@ module.exports = {
   formatRoleMention,
   getStoredFileNameForKey,
   normalizeCategory,
+  normalizeErrorMessage,
   normalizeStatus,
   normalizeVisibility,
   parseRoleId,

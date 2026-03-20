@@ -1,13 +1,18 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { ChannelType, SlashCommandBuilder } = require('discord.js');
 const { loadModerationState } = require('../storage/moderationStore');
 const { makeEmbed, makeInfoEmbed } = require('../utils/embeds');
 const { buildAvatarEmbed } = require('../services/infoService');
 const { trimText } = require('../utils/helpers');
-const { resolveMemberFromToken, resolveUserFromToken } = require('../services/prefixService');
+const { resolveUserFromToken } = require('../services/prefixService');
 
 function formatTimestamp(timestamp, fallback = 'Unknown') {
   if (!timestamp) return fallback;
   return `<t:${Math.floor(new Date(timestamp).getTime() / 1000)}:F>`;
+}
+
+function formatRelativeTimestamp(timestamp, fallback = 'Unknown') {
+  if (!timestamp) return fallback;
+  return `<t:${Math.floor(new Date(timestamp).getTime() / 1000)}:R>`;
 }
 
 function formatUserLabel(user) {
@@ -32,7 +37,7 @@ function getMemberRoleSummary(member) {
   return {
     count: String(roles.size),
     topRole: topRole ? `<@&${topRole.id}>` : '@everyone only',
-    roleList: roleMentions.length ? trimText(roleMentions.slice(0, 10).join(', '), 1024) : 'None',
+    roleList: roleMentions.length ? trimText(roleMentions.slice(0, 12).join(', '), 1024) : 'None',
   };
 }
 
@@ -58,47 +63,67 @@ async function resolveTargetMember(source, user) {
   return source.guild.members.fetch(user.id).catch(() => null);
 }
 
+function formatPresence(member) {
+  const status = member?.presence?.status;
+  if (!status) return 'Offline / hidden';
+  return status.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 async function buildUserInfoEmbed(source, requestedUser) {
   const user = requestedUser || source.user || source.author;
   const member = await resolveTargetMember(source, user);
   const roleSummary = getMemberRoleSummary(member);
 
   return makeEmbed({
-    title: `User Info • ${formatUserLabel(user)}`,
+    title: `User Profile • ${formatUserLabel(user)}`,
     description: [
       `${user}`,
-      user?.globalName && user.globalName !== user.username ? `Display name: **${trimText(user.globalName, 80)}**` : null,
+      user?.globalName && user.globalName !== user.username ? `Display name • **${trimText(user.globalName, 80)}**` : null,
+      member?.nickname ? `Server nickname • **${trimText(member.nickname, 80)}**` : null,
     ].filter(Boolean).join('\n'),
+    author: {
+      name: 'Redline Member Card',
+      iconURL: user.displayAvatarURL({ size: 512 }),
+    },
     fields: [
-      { name: 'Username', value: trimText(user.username || 'Unknown', 100), inline: true },
-      { name: 'Tag', value: trimText(user.tag || user.username || 'Unknown', 100), inline: true },
-      { name: 'User ID', value: user.id, inline: true },
-      { name: 'Account Created', value: formatTimestamp(user.createdTimestamp), inline: true },
-      { name: 'Server Joined', value: formatTimestamp(member?.joinedTimestamp, source.guild ? 'Not in this server' : 'Outside a server'), inline: true },
-      { name: 'Top Role', value: roleSummary.topRole, inline: true },
-      { name: 'Role Count', value: roleSummary.count, inline: true },
-      { name: 'Moderation Status', value: await getModerationStatus(member), inline: true },
-      { name: 'Roles', value: roleSummary.roleList },
+      { name: 'Identity', value: `Username • **${trimText(user.username || 'Unknown', 100)}**\nTag • **${trimText(user.tag || user.username || 'Unknown', 100)}**\nUser ID • \`${user.id}\``, inline: true },
+      { name: 'Account', value: `Created • ${formatTimestamp(user.createdTimestamp)}\nAge • ${formatRelativeTimestamp(user.createdTimestamp)}`, inline: true },
+      { name: 'Server', value: `Joined • ${formatTimestamp(member?.joinedTimestamp, source.guild ? 'Not in this server' : 'Outside a server')}\nPresence • ${formatPresence(member)}`, inline: true },
+      { name: 'Roles', value: `Top role • ${roleSummary.topRole}\nRole count • **${roleSummary.count}**`, inline: true },
+      { name: 'Moderation', value: await getModerationStatus(member), inline: true },
+      { name: 'Avatar', value: `[Open in browser](${user.displayAvatarURL({ size: 4096 })})`, inline: true },
+      { name: 'Visible Roles', value: roleSummary.roleList, inline: false },
     ],
     thumbnail: user.displayAvatarURL({ size: 1024 }),
-    image: user.displayAvatarURL({ size: 1024 }),
+    image: user.bannerURL?.({ size: 2048 }) || null,
+    footer: 'REDLINE • Public user profile',
   });
 }
 
 async function buildServerInfoEmbed(guild) {
   const owner = guild.ownerId ? `<@${guild.ownerId}>` : 'Unknown';
+  const channels = guild.channels.cache;
+  const textCount = channels.filter((channel) => [ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum].includes(channel.type)).size;
+  const voiceCount = channels.filter((channel) => [ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(channel.type)).size;
+
   return makeEmbed({
-    title: `Server Info • ${guild.name}`,
+    title: `Server Overview • ${guild.name}`,
+    description: trimText(guild.description || 'Community overview and current server stats.', 512),
+    author: {
+      name: 'Redline Server Card',
+      iconURL: guild.iconURL({ extension: 'png', size: 512 }) || undefined,
+    },
     fields: [
-      { name: 'Owner', value: owner, inline: true },
-      { name: 'Members', value: String(guild.memberCount), inline: true },
-      { name: 'Roles', value: String(guild.roles.cache.size), inline: true },
-      { name: 'Channels', value: String(guild.channels.cache.size), inline: true },
-      { name: 'Boost Level', value: `Tier ${guild.premiumTier || 0}`, inline: true },
-      { name: 'Boost Count', value: String(guild.premiumSubscriptionCount || 0), inline: true },
-      { name: 'Created', value: formatTimestamp(guild.createdTimestamp) },
+      { name: 'Ownership', value: `Owner • ${owner}\nServer ID • \`${guild.id}\``, inline: true },
+      { name: 'Members', value: `Total • **${guild.memberCount}**\nBoosts • **${guild.premiumSubscriptionCount || 0}**`, inline: true },
+      { name: 'Setup', value: `Roles • **${guild.roles.cache.size}**\nEmojis • **${guild.emojis.cache.size}**`, inline: true },
+      { name: 'Channels', value: `Text • **${textCount}**\nVoice • **${voiceCount}**\nTotal • **${channels.size}**`, inline: true },
+      { name: 'Boost Tier', value: `Tier **${guild.premiumTier || 0}**`, inline: true },
+      { name: 'Created', value: `${formatTimestamp(guild.createdTimestamp)}\n${formatRelativeTimestamp(guild.createdTimestamp)}`, inline: true },
     ],
-    thumbnail: guild.iconURL() || null,
+    thumbnail: guild.iconURL({ extension: 'png', size: 1024 }) || null,
+    image: guild.bannerURL({ size: 2048 }) || null,
+    footer: 'REDLINE • Public server profile',
   });
 }
 

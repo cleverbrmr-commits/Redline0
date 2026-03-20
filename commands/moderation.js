@@ -63,6 +63,15 @@ function commandMeta(name, category, description, usage, prefixUsage, examples, 
   return { name, category, description, usage, prefixEnabled: true, prefixUsage, examples, permissions, response, restrictions };
 }
 
+function replyPrefixUsage(message, usageLine) {
+  return message.reply({
+    embeds: [makeWarningEmbed({
+      title: 'Usage required',
+      description: `Try: ${usageLine}` ,
+    })],
+  });
+}
+
 const commands = [
   {
     name: 'ban',
@@ -94,7 +103,7 @@ const commands = [
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.BanMembers, 'You need Ban Members to use this command.');
       const target = await resolveMemberFromToken(message.guild, args[0]);
-      if (!target) return message.reply({ content: 'Usage: `Serenity ban @user <reason>`' });
+      if (!target) return replyPrefixUsage(message, '`Serenity ban @user <reason>`');
       const targetError = assertTargetRules({ actorMember: message.member, botMember: await message.guild.members.fetchMe(), targetMember: target });
       if (targetError) return message.reply({ embeds: [makeWarningEmbed({ title: 'Ban denied', description: targetError })] });
       const reason = parseReason(args, 1);
@@ -129,7 +138,7 @@ const commands = [
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.KickMembers, 'You need Kick Members to use this command.');
       const target = await resolveMemberFromToken(message.guild, args[0]);
-      if (!target) return message.reply({ content: 'Usage: `Serenity kick @user <reason>`' });
+      if (!target) return replyPrefixUsage(message, '`Serenity kick @user <reason>`');
       const botMember = await message.guild.members.fetchMe();
       const targetError = assertTargetRules({ actorMember: message.member, botMember, targetMember: target });
       if (targetError) return message.reply({ embeds: [makeWarningEmbed({ title: 'Kick denied', description: targetError })] });
@@ -168,7 +177,7 @@ const commands = [
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.ModerateMembers, 'You need Moderate Members to use this command.');
       const target = await resolveMemberFromToken(message.guild, args[0]);
-      if (!target) return message.reply({ content: 'Usage: `Serenity timeout @user <duration> <reason>`' });
+      if (!target) return replyPrefixUsage(message, '`Serenity timeout @user <duration> <reason>`');
       const parsed = parseDuration(args[1]);
       if (!parsed.ok) return message.reply({ embeds: [makeWarningEmbed({ title: 'Invalid duration', description: parsed.error })] });
       const botMember = await message.guild.members.fetchMe();
@@ -204,7 +213,7 @@ const commands = [
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.BanMembers, 'You need Ban Members to use this command.');
       const userId = extractSnowflake(args[0]);
-      if (!userId) return message.reply({ content: 'Usage: `Serenity unban <user-id> <reason>`' });
+      if (!userId) return replyPrefixUsage(message, '`Serenity unban <user-id> <reason>`');
       const reason = parseReason(args, 1);
       await message.guild.members.unban(userId, reason);
       const user = await client.users.fetch(userId).catch(() => ({ id: userId }));
@@ -234,7 +243,7 @@ const commands = [
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.ManageRoles, 'You need Manage Roles to use this command.');
       const target = await resolveMemberFromToken(message.guild, args[0]);
-      if (!target) return message.reply({ content: 'Usage: `Serenity mute @user <reason>`' });
+      if (!target) return replyPrefixUsage(message, '`Serenity mute @user <reason>`');
       const botMember = await message.guild.members.fetchMe();
       const targetError = assertTargetRules({ actorMember: message.member, botMember, targetMember: target });
       if (targetError) return message.reply({ embeds: [makeWarningEmbed({ title: 'Mute denied', description: targetError })] });
@@ -265,7 +274,7 @@ const commands = [
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.ManageRoles, 'You need Manage Roles to use this command.');
       const target = await resolveMemberFromToken(message.guild, args[0]);
-      if (!target) return message.reply({ content: 'Usage: `Serenity unmute @user <reason>`' });
+      if (!target) return replyPrefixUsage(message, '`Serenity unmute @user <reason>`');
       const muteRole = await ensureMuteRole(message.guild, await message.guild.members.fetchMe());
       const reason = parseReason(args, 1);
       await target.roles.remove(muteRole, reason);
@@ -296,7 +305,7 @@ const commands = [
       ensureMemberPermission(message.member, PermissionFlagsBits.ManageMessages, 'You need Manage Messages to use this command.');
       const target = await resolveMemberFromToken(message.guild, args[0]);
       const reason = parseReason(args, 1, '');
-      if (!target || !reason) return message.reply({ content: 'Usage: `Serenity warn @user <reason>`' });
+      if (!target || !reason) return replyPrefixUsage(message, '`Serenity warn @user <reason>`');
       const botMember = await message.guild.members.fetchMe();
       const targetError = assertTargetRules({ actorMember: message.member, botMember, targetMember: target });
       if (targetError) return message.reply({ embeds: [makeWarningEmbed({ title: 'Warn denied', description: targetError })] });
@@ -318,7 +327,7 @@ const commands = [
     async executePrefix({ message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.ManageMessages, 'You need Manage Messages to use this command.');
       const amount = Number(args[0]);
-      if (!Number.isInteger(amount) || amount < 1 || amount > 100) return message.reply({ content: 'Usage: `Serenity purge <1-100>`' });
+      if (!Number.isInteger(amount) || amount < 1 || amount > 100) return replyPrefixUsage(message, '`Serenity purge <1-100>`');
       const deleted = await message.channel.bulkDelete(amount, true);
       return message.reply({ content: buildShortConfirmation(`Deleted ${deleted.size} message(s).`) });
     },
@@ -340,7 +349,7 @@ const commands = [
       ensureMemberPermission(message.member, PermissionFlagsBits.ManageChannels, 'You need Manage Channels to use this command.');
       const raw = String(args[0] || '').toLowerCase();
       const seconds = raw === 'off' ? 0 : Number(raw);
-      if (!Number.isInteger(seconds) || seconds < 0 || seconds > 21600) return message.reply({ content: 'Usage: `Serenity slowmode <seconds|off>`' });
+      if (!Number.isInteger(seconds) || seconds < 0 || seconds > 21600) return replyPrefixUsage(message, '`Serenity slowmode <seconds|off>`');
       await message.channel.setRateLimitPerUser(seconds, `Slowmode updated by ${message.author.tag}`);
       return message.reply({ embeds: [makeSuccessEmbed({ title: 'Slowmode updated', description: seconds ? `Slowmode is now **${seconds}s** in ${message.channel}.` : `Slowmode has been disabled in ${message.channel}.` })] });
     },
@@ -409,7 +418,7 @@ const commands = [
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.BanMembers, 'You need Ban Members to use this command.');
       const target = await resolveMemberFromToken(message.guild, args[0]);
-      if (!target) return message.reply({ content: 'Usage: `Serenity softban @user <reason>`' });
+      if (!target) return replyPrefixUsage(message, '`Serenity softban @user <reason>`');
       const botMember = await message.guild.members.fetchMe();
       const targetError = assertTargetRules({ actorMember: message.member, botMember, targetMember: target });
       if (targetError) return message.reply({ embeds: [makeWarningEmbed({ title: 'Softban denied', description: targetError })] });
@@ -444,7 +453,7 @@ const commands = [
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.BanMembers, 'You need Ban Members to use this command.');
       const target = await resolveMemberFromToken(message.guild, args[0]);
-      if (!target) return message.reply({ content: 'Usage: `Serenity tempban @user <duration> <reason>`' });
+      if (!target) return replyPrefixUsage(message, '`Serenity tempban @user <duration> <reason>`');
       const parsed = parseDuration(args[1]);
       if (!parsed.ok) return message.reply({ embeds: [makeWarningEmbed({ title: 'Invalid duration', description: parsed.error })] });
       const botMember = await message.guild.members.fetchMe();
@@ -470,7 +479,7 @@ const commands = [
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.ModerateMembers, 'You need Moderate Members to use this command.');
       const user = (await resolveMemberFromToken(message.guild, args[0]))?.user || await resolveUserFromToken(client, args[0]);
-      if (!user) return message.reply({ content: 'Usage: `Serenity infractions @user`' });
+      if (!user) return replyPrefixUsage(message, '`Serenity infractions @user`');
       const infractions = await getInfractionsForUser(message.guild.id, user.id);
       return message.reply({ embeds: [buildInfractionsEmbed(user, infractions)] });
     },
@@ -488,7 +497,7 @@ const commands = [
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.ModerateMembers, 'You need Moderate Members to use this command.');
       const user = (await resolveMemberFromToken(message.guild, args[0]))?.user || await resolveUserFromToken(client, args[0]);
-      if (!user) return message.reply({ content: 'Usage: `Serenity clearwarns @user`' });
+      if (!user) return replyPrefixUsage(message, '`Serenity clearwarns @user`');
       const removed = await clearWarningsForUser(message.guild.id, user.id);
       await logModeration(client, 'Clear Warnings', fakeInteractionFromMessage(message), user, `Removed ${removed} warning(s)`);
       return message.reply({ embeds: [makeSuccessEmbed({ title: 'Warnings cleared', description: `Removed **${removed}** warning(s) for <@${user.id}>.` })] });
@@ -514,7 +523,7 @@ const commands = [
       ensureMemberPermission(message.member, PermissionFlagsBits.ManageNicknames, 'You need Manage Nicknames to use this command.');
       const target = await resolveMemberFromToken(message.guild, args[0]);
       const nickname = args.slice(1).join(' ').trim();
-      if (!target || !nickname) return message.reply({ content: 'Usage: `Serenity nickname @user <new nickname>`' });
+      if (!target || !nickname) return replyPrefixUsage(message, '`Serenity nickname @user <new nickname>`');
       const botMember = await message.guild.members.fetchMe();
       const targetError = assertTargetRules({ actorMember: message.member, botMember, targetMember: target });
       if (targetError) return message.reply({ embeds: [makeWarningEmbed({ title: 'Nickname denied', description: targetError })] });
@@ -557,7 +566,7 @@ const commands = [
       const action = String(args[0] || '').toLowerCase();
       const target = await resolveMemberFromToken(message.guild, args[1]);
       const role = await resolveRoleFromToken(message.guild, args[2]);
-      if (!['add', 'remove'].includes(action) || !target || !role) return message.reply({ content: 'Usage: `Serenity role <add|remove> @user @role`' });
+      if (!['add', 'remove'].includes(action) || !target || !role) return replyPrefixUsage(message, '`Serenity role <add|remove> @user @role`');
       const botMember = await message.guild.members.fetchMe();
       const targetError = assertTargetRules({ actorMember: message.member, botMember, targetMember: target });
       if (targetError) return message.reply({ embeds: [makeWarningEmbed({ title: 'Role update denied', description: targetError })] });
@@ -589,7 +598,7 @@ const commands = [
     async executePrefix({ client, message, args }) {
       ensureMemberPermission(message.member, PermissionFlagsBits.MoveMembers, 'You need Move Members to use this command.');
       const target = await resolveMemberFromToken(message.guild, args[0]);
-      if (!target?.voice?.channel) return message.reply({ content: 'Usage: `Serenity vckick @user <reason>`' });
+      if (!target?.voice?.channel) return replyPrefixUsage(message, '`Serenity vckick @user <reason>`');
       const botMember = await message.guild.members.fetchMe();
       const targetError = assertTargetRules({ actorMember: message.member, botMember, targetMember: target });
       if (targetError) return message.reply({ embeds: [makeWarningEmbed({ title: 'VC kick denied', description: targetError })] });
