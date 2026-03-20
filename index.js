@@ -17,6 +17,7 @@ const { ensureModerationStore } = require('./storage/moderationStore');
 const { ensureYoutubeStore } = require('./storage/youtubeStore');
 const { startTempbanScheduler } = require('./services/moderationService');
 const { startYoutubePolling } = require('./services/youtubeService');
+const { destroyMusicSubsystem, ensureMusicSubsystem } = require('./services/musicService');
 
 const PREFIX_NAME = process.env.BOT_PREFIX_NAME || 'Serenity';
 
@@ -101,12 +102,21 @@ async function bootstrap() {
     console.log(`Prefix trigger: ${PREFIX_NAME}`);
 
     await registerCommands(commandRegistry);
+    await ensureMusicSubsystem(client);
     startBackgroundJobs(client);
     console.log('Slash commands registered successfully.');
   });
 
   process.on('unhandledRejection', (error) => console.error('Unhandled promise rejection:', error));
   process.on('uncaughtException', (error) => console.error('Uncaught exception:', error));
+  process.on('SIGINT', async () => {
+    await destroyMusicSubsystem();
+    process.exit(0);
+  });
+  process.on('SIGTERM', async () => {
+    await destroyMusicSubsystem();
+    process.exit(0);
+  });
 
   await client.login(process.env.DISCORD_TOKEN);
 }

@@ -1,23 +1,16 @@
 # REDLINE CLIENT HUB
 
-Redline is a modular Discord.js v14 bot for client delivery, moderation, help tooling, welcome automation, reaction polls, and YouTube notifications. The architecture stays split across `commands/`, `handlers/`, `services/`, `storage/`, and `utils/`, while `index.js` remains bootstrap-only.
+Redline is a modular Discord.js v14 bot for client delivery, moderation, help tooling, welcome automation, reaction polls, YouTube notifications, and now a modular music subsystem. The architecture stays split across `commands/`, `handlers/`, `services/`, `storage/`, and `utils/`, while `index.js` remains bootstrap-only.
 
-## Root cause / design analysis
+## Architecture overview
 
-The current build keeps the bot modular while fixing three gaps that mattered for server operations:
+The current build keeps Serenity modular by design:
 
-- welcome automation did not exist as a reusable service with stored guild configuration,
-- `/avatar` was private even though it should behave like a normal public utility command,
-- polls were missing entirely, including reusable validation, formatting, and reaction handling for both slash and prefix flows.
-
-The implementation now fixes that by:
-
-- keeping `index.js` limited to env loading, validation, client creation, command loading, handler attachment, slash registration, background job startup, and login,
-- adding a dedicated guild-member join handler that delegates all welcome delivery to `services/welcomerService.js`,
-- storing welcomer state in the existing config system instead of scattering one-off files,
-- adding a modular poll service that builds embed and plain polls from shared business logic,
-- making `/avatar` public and reusing shared avatar embed logic for slash and prefix execution,
-- tightening help metadata usage so new commands document themselves cleanly.
+- `index.js` only handles environment loading, storage startup, client creation, command loading, event attachment, slash registration, subsystem boot, and login.
+- `commands/` contains user-facing slash/prefix command definitions and metadata.
+- `services/` contains shared business logic such as playback orchestration, queue state, YouTube polling, moderation, and help generation.
+- `storage/` holds persisted JSON-backed state for existing subsystems.
+- `utils/` contains shared embed builders, formatting helpers, and other reusable UI helpers.
 
 ## Project structure
 
@@ -33,6 +26,7 @@ commands/
   help.js
   info.js
   moderation.js
+  music.js
   poll.js
   prison.js
   removeclient.js
@@ -52,9 +46,11 @@ services/
   infoService.js
   logService.js
   moderationService.js
+  musicService.js
   panelService.js
   pollService.js
   prefixService.js
+  queueService.js
   welcomerService.js
   youtubeService.js
 storage/
@@ -68,6 +64,7 @@ utils/
   duration.js
   embeds.js
   helpers.js
+  musicEmbeds.js
   permissions.js
 ```
 
@@ -103,6 +100,97 @@ utils/
 - `MOD_LOG_CHANNEL_ID`
 - `PRISON_LOG_CHANNEL_ID`
 - `ANNOUNCE_LOG_CHANNEL_ID`
+- `SPOTIFY_CLIENT_ID` — recommended for Spotify track/playlist link resolution.
+- `SPOTIFY_CLIENT_SECRET` — recommended for Spotify track/playlist link resolution.
+- `SPOTIFY_REFRESH_TOKEN` — optional; improves Spotify token refresh compatibility when available.
+- `SPOTIFY_MARKET` — defaults to `US`.
+- `SOUNDCLOUD_CLIENT_ID` — optional; if omitted, the bot will attempt a best-effort SoundCloud client bootstrap.
+- `YOUTUBE_COOKIE` — optional; can improve YouTube playback reliability for some regions or restricted content.
+
+## Music subsystem
+
+### Design goals
+
+The music system is intentionally modular and does **not** flatten Serenity into a monolithic music bot:
+
+- `commands/music.js` defines slash + prefix-compatible command contracts and help metadata.
+- `services/musicService.js` handles source resolution, voice joins, playback flow, and guardrails.
+- `services/queueService.js` manages per-guild queue state, loop mode, volume, and queue mutations.
+- `utils/musicEmbeds.js` builds premium-style playback, queue, and state embeds.
+
+### Supported sources
+
+Music playback is implemented with `play-dl` plus `@discordjs/voice`.
+
+Practical support includes:
+
+- YouTube links
+- YouTube Music watch/playlist links normalized into standard YouTube URLs where possible
+- YouTube search queries
+- Spotify track links
+- Spotify album / playlist links resolved best-effort into playable YouTube matches
+- SoundCloud tracks and playlists where provider access succeeds
+
+### Slash commands
+
+- `/play query_or_url`
+- `/pause`
+- `/resume`
+- `/skip`
+- `/stop`
+- `/queue [page]`
+- `/nowplaying`
+- `/remove position`
+- `/clear`
+- `/shuffle`
+- `/loop mode`
+- `/volume value`
+- `/leave`
+
+### Prefix commands
+
+The centralized prefix trigger remains the bot name, so music works alongside the existing Serenity command system:
+
+- `Serenity play <query or url>`
+- `Serenity pause`
+- `Serenity resume`
+- `Serenity skip`
+- `Serenity stop`
+- `Serenity queue [page]`
+- `Serenity nowplaying`
+- `Serenity remove <position>`
+- `Serenity clear`
+- `Serenity shuffle`
+- `Serenity loop <off|track|queue>`
+- `Serenity volume <0-200>`
+- `Serenity leave`
+
+### Music behavior rules
+
+- Users must be in a voice channel before starting playback or using queue controls.
+- Control commands require the user to be in the same voice channel as Serenity.
+- Serenity joins the invoker’s voice channel automatically when playback begins.
+- Empty queues, invalid URLs, unsupported links, provider failures, and missing permissions return clean command errors instead of crashing the bot.
+- Long queues are safely truncated into paginated queue views.
+- `/help` automatically includes the music commands because they are registered through shared command metadata.
+
+### Music dependencies
+
+Install these runtime dependencies:
+
+```bash
+npm install @discordjs/voice play-dl libsodium-wrappers opusscript
+```
+
+Depending on your host environment, Discord voice may also need one of the encryption/voice runtime dependencies documented by `@discordjs/voice`. Serenity now declares `libsodium-wrappers` and `opusscript` to improve Railway/container compatibility, and it logs a voice dependency report at startup to help diagnose missing host requirements.
+
+### Provider notes / limitations
+
+- YouTube Music links are normalized into standard YouTube watch or playlist URLs when possible.
+- Spotify is used as a metadata source and is resolved into playable YouTube matches inside Serenity's queue flow.
+- Spotify collection imports are best-effort: tracks that cannot be matched are skipped instead of crashing the queue.
+- Some YouTube videos may still fail if YouTube requires cookies, account verification, or region-specific access; set `YOUTUBE_COOKIE` if needed.
+- If Railway still reports voice aborts, inspect the startup dependency report first: missing/unsupported voice runtime pieces can prevent `@discordjs/voice` from reaching a stable `Playing` state even after a track resolves successfully.
 
 ## Prefix commands
 
@@ -120,6 +208,9 @@ The centralized message-command trigger is the bot name:
 - `Serenity poll embed Best client? | Volt | Apex | Nova`
 - `Serenity poll normal Favorite mode? | Survival | PvP | Skyblock`
 - `Serenity yt-notify add <youtube-url> #uploads true`
+- `Serenity play lofi hip hop`
+- `Serenity queue`
+- `Serenity skip`
 
 The leading bot name is parsed case-insensitively.
 
@@ -135,6 +226,7 @@ The leading bot name is parsed case-insensitively.
 - the poll message created by `/poll` or `Serenity poll`
 - moderation action confirmations, unless the command is returning a private validation / permission error.
 - `/yt-notify` confirmations and lists.
+- music control messages and queue / now playing embeds.
 
 ### Ephemeral
 - `/welcomer` configuration responses
@@ -171,21 +263,6 @@ Each welcome message includes:
 - `Serenity welcomer off`
 - `Serenity welcomer status`
 
-### Permissions needed
-
-- Slash: `Manage Guild`
-- Prefix: the invoking member must have `Manage Guild`
-- Target channels must be valid server text or announcement channels.
-
-### Setup flow
-
-1. Run `/welcomer set channel:#welcome`.
-2. Run `/welcomer on`.
-3. Use `/welcomer status` any time to confirm the stored state.
-4. Run `/welcomer off` to disable the system without losing the saved channel.
-
-If the stored welcome channel is missing or no longer sendable, the bot skips the message safely and logs the issue instead of crashing.
-
 ## Poll system
 
 ### Slash command structure
@@ -201,24 +278,6 @@ Use `|` as the delimiter:
 
 - `Serenity poll embed Best client? | Volt | Apex | Nova`
 - `Serenity poll normal Favorite mode? | Survival | PvP | Skyblock`
-
-### Embed mode
-
-Embed polls post a styled Redline embed that includes:
-
-- the poll question as the title,
-- an emoji-numbered option list,
-- the poll creator,
-- a timestamp.
-
-### Normal mode
-
-Normal polls post a plain text poll message with the same numbered options and automatic reactions, but without an embed.
-
-### Permissions needed
-
-- Slash: `Manage Messages`
-- Prefix: the invoking member must have `Manage Messages`
 
 ## Help system
 
@@ -240,11 +299,14 @@ Detailed help includes:
 - `/userinfo`
 - `/serverinfo`
 - `/roleinfo`
-- `/avatar` *(public)*
+- `/avatar`
 - `/ping`
 - `/botinfo`
 - `/poll`
 - `/yt-search`
+- `/play`
+- `/queue`
+- `/nowplaying`
 
 ## YouTube system
 
@@ -257,72 +319,3 @@ Detailed help includes:
 - `/yt-notify add youtube_channel_link discord_channel ping_everyone`
 - `/yt-notify remove youtube_channel_link`
 - `/yt-notify list`
-
-### Notification behavior
-
-Each subscription stores:
-
-- guild ID,
-- YouTube channel ID,
-- YouTube channel URL,
-- resolved channel title,
-- target Discord channel ID,
-- `pingEveryone` flag,
-- `lastVideoId`.
-
-New uploads are posted **only** to the configured Discord channel for that subscription. There is no global broadcast fallback.
-
-### API behavior
-
-- `/yt-search` uses the YouTube Data API and requires `YOUTUBE_API_KEY`.
-- upload notifications use YouTube channel resolution + feed polling and fail gracefully if the URL cannot be resolved.
-
-## Client / content management commands
-
-Preserved and documented commands:
-
-- `/clients`
-- `/upload`
-- `/removeclient`
-- `/editclient`
-- `/announceclient`
-- `/exportclients`
-- `/backup`
-- `/clientpanel send`
-- `/panel`
-
-## Persistent storage
-
-### Files
-- `modules.json` — client metadata.
-- `moderation.json` — infractions, tempbans, mute role config, locked-channel state.
-- `youtube-subscriptions.json` — YouTube subscriptions and last seen uploads.
-- `prison-state.json` — prison records and removed roles.
-- `config.json` — runtime bot channel config plus per-guild welcomer settings.
-- `embeds.json` — saved custom embeds.
-
-### On startup
-- slash commands are registered,
-- tempban expiration checks resume automatically,
-- YouTube polling resumes automatically,
-- persistent moderation and YouTube data are reloaded before use.
-
-## Storage / config notes
-
-- tempbans are persisted and automatically unbanned once expired.
-- warnings and other moderation actions are stored in the infractions history.
-- the mute system stores the created mute role ID per guild.
-- channel lock state stores the prior `@everyone` send-message setting so unlock can restore it cleanly.
-- welcomer settings are stored under `config.json` as `welcomers[guildId] = { enabled, channelId }`.
-
-## Needed from user
-
-To finish production setup, provide or confirm:
-
-- `DISCORD_TOKEN`
-- `CLIENT_ID`
-- `GUILD_ID`
-- optional `BOT_PREFIX_NAME` if you want something other than `Serenity`
-- `YOUTUBE_API_KEY` if you want `/yt-search`
-- optional log channel IDs (`DOWNLOAD_LOG_CHANNEL_ID`, `MOD_LOG_CHANNEL_ID`, `PRISON_LOG_CHANNEL_ID`, `ANNOUNCE_LOG_CHANNEL_ID`)
-- optional polling overrides (`YOUTUBE_POLL_INTERVAL_MS`, `TEMPBAN_CHECK_INTERVAL_MS`)
