@@ -1,4 +1,4 @@
-const DEFAULT_SEARCH_PLATFORM = 'ytmsearch';
+const DEFAULT_SEARCH_PLATFORM = 'ytsearch';
 const DEFAULT_REST_VERSION = 'v4';
 
 function parseBoolean(value, fallback = false) {

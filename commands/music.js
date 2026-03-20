@@ -64,7 +64,7 @@ function buildCommand({
       response: 'public',
       restrictions: [
         'Most control commands require the user to be in the same voice channel as Serenity.',
-        'Spotify links are metadata-only and require Lavalink/extractor support to resolve into a playable source.',
+        'Spotify direct playback is not supported in the current Lavalink setup. Use YouTube URLs or plain text searches instead.',
       ],
     },
     data,
@@ -85,7 +85,7 @@ module.exports = {
       name: 'play',
       description: 'Join your voice channel and play a track, playlist, or supported search result through Serenity\'s Lavalink-backed player.',
       usage: ['/play query_or_url:<text>'],
-      examples: ['/play query_or_url:deadmau5 strobe', '/play query_or_url:https://youtu.be/dQw4w9WgXcQ', 'Serenity play lofi hip hop', 'Serenity play https://open.spotify.com/track/...'],
+      examples: ['/play query_or_url:deadmau5 strobe', '/play query_or_url:https://youtu.be/dQw4w9WgXcQ', 'Serenity play lofi hip hop', 'Serenity play https://www.youtube.com/watch?v=dQw4w9WgXcQ'],
       data: new SlashCommandBuilder()
         .setName('play')
         .setDescription('Play music from a URL or search query')

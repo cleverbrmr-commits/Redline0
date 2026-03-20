@@ -108,7 +108,7 @@ utils/
 - `LAVALINK_SECURE` — `true` when your node uses TLS.
 - `LAVALINK_NAME` — optional display name for the single node configuration.
 - `LAVALINK_NODES` — optional JSON array of nodes instead of the single-node variables.
-- `LAVALINK_DEFAULT_SEARCH` — defaults to `ytmsearch`.
+- `LAVALINK_DEFAULT_SEARCH` — defaults to `ytsearch`.
 - `LAVALINK_REST_VERSION` — defaults to `v4`.
 - `MUSIC_AUTO_LEAVE_ON_QUEUE_END` — defaults to `true`.
 
@@ -140,14 +140,16 @@ The imported foundation was refactored into Serenity’s architecture instead of
 Support depends on your Lavalink server and installed extractors/plugins, but this subsystem is designed to handle the same practical input classes as the provided source bot:
 
 - YouTube links and searches
-- YouTube Music searches via the default `ytmsearch` platform
+- YouTube searches via the default `ytsearch` platform
 - SoundCloud links/searches when your Lavalink stack supports them
-- Spotify links as **metadata-only** inputs that must resolve to another playable provider through Lavalink/extractor support
+- Spotify links are rejected with a clear message unless you add explicit Spotify metadata/extractor support
 
 If a provider cannot be resolved, Serenity now returns clearer errors such as:
 
-- “failed to resolve a playable track”
-- “Spotify links are metadata-only here”
+- “invalid URL”
+- “no results found”
+- “Spotify direct playback is not supported”
+- “failed to resolve a playable YouTube track”
 - “you must join a voice channel first”
 - “queue is empty”
 - “Serenity needs Connect and Speak permissions”

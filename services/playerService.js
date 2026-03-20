@@ -46,6 +46,114 @@ function logWarn(message, error = null) {
   if (error) console.warn(error);
 }
 
+function isLikelyHttpUrl(value) {
+  return /^https?:\/\//i.test(String(value || '').trim());
+}
+
+function hasSearchPrefix(value) {
+  return /^[a-z]+search:/i.test(String(value || '').trim());
+}
+
+function hasUriScheme(value) {
+  return /^[a-z][a-z0-9+.-]*:/i.test(String(value || '').trim());
+}
+
+function parseUrl(value) {
+  try {
+    return new URL(value);
+  } catch (error) {
+    return null;
+  }
+}
+
+function isSpotifyUrl(url) {
+  const hostname = String(url?.hostname || '').toLowerCase();
+  return hostname === 'open.spotify.com' || hostname.endsWith('.spotify.com');
+}
+
+function buildSearchIdentifier(query) {
+  const runtimeConfig = getMusicRuntimeConfig();
+  const preferredPlatform = String(runtimeConfig.defaultSearchPlatform || '').trim() || 'ytsearch';
+  return `${preferredPlatform}:${query}`;
+}
+
+function normalizeResolveInput(rawInput) {
+  const input = String(rawInput || '').trim();
+  if (!input) {
+    throw new MusicError('Provide a search query or supported URL for `/play`.');
+  }
+
+  if (hasSearchPrefix(input)) {
+    const [, prefix, query = ''] = input.match(/^([a-z]+search:)(.*)$/i) || [];
+    const normalizedQuery = String(query).trim();
+    if (!normalizedQuery) {
+      throw new MusicError('Provide a search query after the search prefix.');
+    }
+
+    return {
+      identifier: `${prefix}${normalizedQuery}`,
+      inputType: 'search',
+      original: input,
+    };
+  }
+
+  if (isLikelyHttpUrl(input)) {
+    if (/\s/.test(input)) {
+      throw new MusicError('Invalid URL. URLs cannot contain spaces.');
+    }
+
+    const parsedUrl = parseUrl(input);
+    if (!parsedUrl) {
+      throw new MusicError('Invalid URL.');
+    }
+
+    if (isSpotifyUrl(parsedUrl)) {
+      throw new MusicError('Spotify direct playback is not supported. Use a YouTube URL or search query instead.');
+    }
+
+    return {
+      identifier: parsedUrl.toString(),
+      inputType: 'url',
+      original: input,
+    };
+  }
+
+  if (/^spotify:/i.test(input)) {
+    throw new MusicError('Spotify direct playback is not supported. Use a YouTube URL or search query instead.');
+  }
+
+  if (hasUriScheme(input)) {
+    throw new MusicError('Invalid URL.');
+  }
+
+  return {
+    identifier: buildSearchIdentifier(input),
+    original: input,
+  };
+}
+
+function classifyResolveFailure(error) {
+  const message = String(error?.message || '').toLowerCase();
+
+  if (message.includes('no matches') || message.includes('no result') || message.includes('not found')) {
+    return 'No results found.';
+  }
+
+  if (message.includes('not a valid url') || message.includes('unknown file format') || message.includes('illegal character in path')) {
+    return 'Invalid URL.';
+  }
+
+  if (message.includes('spotify')) {
+    return 'Spotify direct playback is not supported.';
+  }
+
+  if (message.includes('youtube')) {
+    return 'Failed to resolve a playable YouTube track.';
+  }
+
+  return 'Failed to resolve a playable track.';
+}
+
 function ensureRiffyPatched() {
   try {
     const { Node } = require('riffy/build/structures/Node');
@@ -394,37 +502,24 @@ async function createOrReusePlayer({ guild, member, textChannelId }) {
 async function resolveTracks({ guildId, query, requesterId }) {
   ensurePlaybackAvailable();
 
-  const input = String(query || '').trim();
-  if (!input) {
-    throw new MusicError('Provide a search query or supported URL for `/play`.');
-  }
+  const normalized = normalizeResolveInput(query);
+  updateGuildState(guildId, { lastResolvedQuery: normalized.identifier });
 
   try {
     const result = await riffy.resolve({
-      query: input,
+      query: normalized.identifier,
       requester: requesterId,
-      source: input,
-      guildId,
     });
 
     if (!result || !Array.isArray(result.tracks) || !result.tracks.length) {
-      throw new MusicError('Failed to resolve a playable track. No results were found for that search or URL.');
+      throw new MusicError('No results found.');
     }
 
     return result;
   } catch (error) {
     if (error instanceof MusicError) throw error;
-    const message = String(error?.message || '').toLowerCase();
-    if (message.includes('spotify')) {
-      throw new MusicError('Spotify links are metadata-only here. Serenity could not resolve that Spotify item into a playable source.');
-    }
-    if (message.includes('youtube')) {
-      throw new MusicError('YouTube failed to return a playable result for that query or URL.');
-    }
-    if (message.includes('soundcloud')) {
-      throw new MusicError('SoundCloud failed to return a playable result for that query or URL.');
-    }
-    throw new MusicError('Failed to resolve a playable track from that input.');
+    logWarn(`Track resolution failed for guild ${guildId} with input "${normalized.original}" -> "${normalized.identifier}".`, error);
+    throw new MusicError(classifyResolveFailure(error));
   }
 }
 
