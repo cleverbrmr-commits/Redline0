@@ -1,14 +1,11 @@
-const { createAudioPlayer, NoSubscriberBehavior, AudioPlayerStatus, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
-
-const DEFAULT_VOLUME = 80;
-const MAX_VOLUME = 200;
 const LOOP_MODES = {
   OFF: 'off',
   TRACK: 'track',
   QUEUE: 'queue',
 };
 
-const guildQueues = new Map();
+const MAX_VOLUME = 200;
+const DEFAULT_VOLUME = 100;
 
 function clampVolume(value) {
   const numeric = Number(value);
@@ -16,158 +13,161 @@ function clampVolume(value) {
   return Math.min(MAX_VOLUME, Math.max(0, Math.round(numeric)));
 }
 
-function createGuildQueue({ guildId, textChannelId = null, voiceChannelId = null }) {
-  const player = createAudioPlayer({
-    behaviors: {
-      noSubscriber: NoSubscriberBehavior.Pause,
-    },
-  });
+function getQueueEntries(player) {
+  const queue = player?.queue;
+  if (!queue) return [];
+  if (Array.isArray(queue)) return [...queue];
+  if (typeof queue.toArray === 'function') return queue.toArray();
+  if (Array.isArray(queue.tracks)) return [...queue.tracks];
+  if (typeof queue.values === 'function') return [...queue.values()];
+  if (typeof queue[Symbol.iterator] === 'function') return [...queue];
+  return [];
+}
 
-  const queue = {
-    guildId,
-    textChannelId,
-    voiceChannelId,
-    connection: null,
-    player,
-    tracks: [],
-    currentTrack: null,
-    loopMode: LOOP_MODES.OFF,
-    volume: DEFAULT_VOLUME,
-    nowPlayingStartedAt: null,
-    destroyed: false,
+function getCurrentTrack(player) {
+  return player?.current || player?.queue?.current || null;
+}
+
+function getQueueLength(player) {
+  return getQueueEntries(player).length + (getCurrentTrack(player) ? 1 : 0);
+}
+
+function setTrackRequester(track, requesterId) {
+  if (!track) return track;
+  track.info = {
+    ...(track.info || {}),
+    requester: requesterId || track.info?.requester || null,
   };
-
-  guildQueues.set(guildId, queue);
-  return queue;
+  return track;
 }
 
-function getGuildQueue(guildId) {
-  return guildQueues.get(guildId) || null;
-}
+function addTracks(player, tracks, requesterId) {
+  const normalized = tracks.map((track) => setTrackRequester(track, requesterId));
 
-function getOrCreateGuildQueue(options) {
-  return getGuildQueue(options.guildId) || createGuildQueue(options);
-}
-
-function getAllGuildQueues() {
-  return [...guildQueues.values()];
-}
-
-function setQueueConnection(queue, connection) {
-  queue.connection = connection;
-
-  if (connection) {
-    queue.voiceChannelId = connection.joinConfig.channelId;
-    connection.subscribe(queue.player);
+  if (typeof player?.queue?.add === 'function') {
+    for (const track of normalized) {
+      player.queue.add(track);
+    }
+  } else if (Array.isArray(player?.queue)) {
+    player.queue.push(...normalized);
   }
-}
 
-function attachTrack(queue, track) {
-  return {
-    ...track,
-    queuePositionHint: queue.currentTrack ? queue.tracks.length + 2 : queue.tracks.length + 1,
-  };
-}
-
-function enqueueTracks(queue, tracks) {
-  const normalized = tracks.map((track) => attachTrack(queue, track));
-  queue.tracks.push(...normalized);
   return normalized;
 }
 
-function dequeueNextTrack(queue) {
-  return queue.tracks.shift() || null;
+function clearQueue(player) {
+  const entries = getQueueEntries(player);
+
+  if (typeof player?.queue?.clear === 'function') {
+    player.queue.clear();
+  } else if (Array.isArray(player?.queue)) {
+    player.queue.length = 0;
+  } else if (Array.isArray(player?.queue?.tracks)) {
+    player.queue.tracks.length = 0;
+  }
+
+  return entries.length;
 }
 
-function setCurrentTrack(queue, track) {
-  queue.currentTrack = track || null;
-  queue.nowPlayingStartedAt = track ? Date.now() : null;
-}
-
-function getQueueSize(queue) {
-  return (queue.currentTrack ? 1 : 0) + queue.tracks.length;
-}
-
-function clearUpcoming(queue) {
-  const removed = queue.tracks.length;
-  queue.tracks = [];
-  return removed;
-}
-
-function removeTrack(queue, position) {
+function removeTrack(player, position) {
+  const entries = getQueueEntries(player);
   const index = Number(position) - 2;
-  if (!Number.isInteger(index) || index < 0 || index >= queue.tracks.length) {
+
+  if (!Number.isInteger(index) || index < 0 || index >= entries.length) {
     return null;
   }
 
-  return queue.tracks.splice(index, 1)[0] || null;
+  let removed = null;
+  if (typeof player?.queue?.remove === 'function') {
+    removed = player.queue.remove(index);
+  } else if (Array.isArray(player?.queue)) {
+    removed = player.queue.splice(index, 1)[0] || null;
+  } else if (Array.isArray(player?.queue?.tracks)) {
+    removed = player.queue.tracks.splice(index, 1)[0] || null;
+  }
+
+  return removed || entries[index] || null;
 }
 
-function shuffleQueue(queue) {
-  for (let index = queue.tracks.length - 1; index > 0; index -= 1) {
+function shuffleQueue(player) {
+  if (typeof player?.queue?.shuffle === 'function') {
+    player.queue.shuffle();
+    return getQueueEntries(player);
+  }
+
+  const entries = getQueueEntries(player);
+  for (let index = entries.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(Math.random() * (index + 1));
-    [queue.tracks[index], queue.tracks[swapIndex]] = [queue.tracks[swapIndex], queue.tracks[index]];
+    [entries[index], entries[swapIndex]] = [entries[swapIndex], entries[index]];
   }
 
-  return queue.tracks;
-}
-
-function setLoopMode(queue, mode) {
-  queue.loopMode = Object.values(LOOP_MODES).includes(mode) ? mode : LOOP_MODES.OFF;
-  return queue.loopMode;
-}
-
-function setQueueVolume(queue, volume) {
-  queue.volume = clampVolume(volume);
-  const resource = queue.player.state.resource;
-  if (resource?.volume) {
-    resource.volume.setVolume(queue.volume / 100);
+  if (Array.isArray(player?.queue)) {
+    player.queue.length = 0;
+    player.queue.push(...entries);
+  } else if (Array.isArray(player?.queue?.tracks)) {
+    player.queue.tracks.length = 0;
+    player.queue.tracks.push(...entries);
   }
-  return queue.volume;
+
+  return entries;
 }
 
-async function waitForConnectionReady(connection) {
-  await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
-  return connection;
+function setLoopMode(player, mode) {
+  const normalized = Object.values(LOOP_MODES).includes(mode) ? mode : LOOP_MODES.OFF;
+
+  if (typeof player?.setLoop === 'function') {
+    player.setLoop(normalized);
+  } else {
+    player.loop = normalized;
+  }
+
+  return normalized;
 }
 
-function destroyQueue(guildId) {
-  const queue = guildQueues.get(guildId);
-  if (!queue) return false;
+function getLoopMode(player) {
+  const value = String(player?.loop || player?.queue?.loop || LOOP_MODES.OFF).toLowerCase();
+  return Object.values(LOOP_MODES).includes(value) ? value : LOOP_MODES.OFF;
+}
 
-  queue.destroyed = true;
-  try {
-    queue.player.stop(true);
-  } catch {}
-  try {
-    queue.connection?.destroy();
-  } catch {}
+function setPlayerVolume(player, volume) {
+  const normalized = clampVolume(volume);
+  if (typeof player?.setVolume === 'function') {
+    player.setVolume(normalized);
+  } else {
+    player.volume = normalized;
+  }
+  return normalized;
+}
 
-  guildQueues.delete(guildId);
-  return true;
+function getPlayerVolume(player) {
+  return clampVolume(player?.volume ?? DEFAULT_VOLUME);
+}
+
+function isPlayerPaused(player) {
+  return Boolean(player?.paused || player?.isPaused);
+}
+
+function isPlayerPlaying(player) {
+  return Boolean(player?.playing || player?.isPlaying);
 }
 
 module.exports = {
-  AudioPlayerStatus,
+  DEFAULT_VOLUME,
   LOOP_MODES,
   MAX_VOLUME,
-  DEFAULT_VOLUME,
-  VoiceConnectionStatus,
-  clearUpcoming,
+  addTracks,
   clampVolume,
-  createGuildQueue,
-  dequeueNextTrack,
-  destroyQueue,
-  enqueueTracks,
-  getAllGuildQueues,
-  getGuildQueue,
-  getOrCreateGuildQueue,
-  getQueueSize,
+  clearQueue,
+  getCurrentTrack,
+  getLoopMode,
+  getPlayerVolume,
+  getQueueEntries,
+  getQueueLength,
+  isPlayerPaused,
+  isPlayerPlaying,
   removeTrack,
-  setCurrentTrack,
   setLoopMode,
-  setQueueConnection,
-  setQueueVolume,
+  setPlayerVolume,
+  setTrackRequester,
   shuffleQueue,
-  waitForConnectionReady,
 };

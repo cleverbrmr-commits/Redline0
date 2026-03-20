@@ -189,7 +189,7 @@ function createInteractionHandler(client, commandRegistry, prefixName) {
     } catch (err) {
       console.error('Interaction error:', err);
 
-      const embed = makeWarningEmbed({ title: 'Operation failed', description: prettyError(err) });
+      const embed = makeWarningEmbed({ title: 'Request could not be completed', description: prettyError(err) });
 
       if (interaction.deferred) {
         try {

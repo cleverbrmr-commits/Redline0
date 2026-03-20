@@ -1,6 +1,6 @@
 # REDLINE CLIENT HUB
 
-Redline is a modular Discord.js v14 bot for client delivery, moderation, help tooling, welcome automation, reaction polls, YouTube notifications, and now a modular music subsystem. The architecture stays split across `commands/`, `handlers/`, `services/`, `storage/`, and `utils/`, while `index.js` remains bootstrap-only.
+Redline is a modular Discord.js v14 bot for client delivery, moderation, help tooling, welcome automation, reaction polls, YouTube notifications, and a rebuilt Serenity-branded music subsystem. The architecture stays split across `commands/`, `handlers/`, `services/`, `storage/`, and `utils/`, while `index.js` remains bootstrap-only.
 
 ## Architecture overview
 
@@ -46,8 +46,10 @@ services/
   infoService.js
   logService.js
   moderationService.js
+  musicConfigService.js
   musicService.js
   panelService.js
+  playerService.js
   pollService.js
   prefixService.js
   queueService.js
@@ -89,6 +91,9 @@ utils/
 - `DISCORD_TOKEN` — your bot token.
 - `CLIENT_ID` — your Discord application client ID.
 - `GUILD_ID` — the guild used for guild-scoped slash registration.
+- `LAVALINK_HOST` — Lavalink host for music playback.
+- `LAVALINK_PORT` — Lavalink port.
+- `LAVALINK_PASSWORD` — Lavalink password.
 
 ## Optional environment variables
 
@@ -100,35 +105,52 @@ utils/
 - `MOD_LOG_CHANNEL_ID`
 - `PRISON_LOG_CHANNEL_ID`
 - `ANNOUNCE_LOG_CHANNEL_ID`
-- `SPOTIFY_CLIENT_ID` — recommended for Spotify track/playlist link resolution.
-- `SPOTIFY_CLIENT_SECRET` — recommended for Spotify track/playlist link resolution.
-- `SPOTIFY_REFRESH_TOKEN` — optional; improves Spotify token refresh compatibility when available.
-- `SPOTIFY_MARKET` — defaults to `US`.
-- `SOUNDCLOUD_CLIENT_ID` — optional; if omitted, the bot will attempt a best-effort SoundCloud client bootstrap.
-- `YOUTUBE_COOKIE` — optional; can improve YouTube playback reliability for some regions or restricted content.
+- `LAVALINK_SECURE` — `true` when your node uses TLS.
+- `LAVALINK_NAME` — optional display name for the single node configuration.
+- `LAVALINK_NODES` — optional JSON array of nodes instead of the single-node variables.
+- `LAVALINK_DEFAULT_SEARCH` — defaults to `ytmsearch`.
+- `LAVALINK_REST_VERSION` — defaults to `v4`.
+- `MUSIC_AUTO_LEAVE_ON_QUEUE_END` — defaults to `true`.
 
 ## Music subsystem
 
-### Design goals
+### What changed
 
-The music system is intentionally modular and does **not** flatten Serenity into a monolithic music bot:
+The old broken `play-dl` + `@discordjs/voice` music path has been replaced with a modular Lavalink-backed system built around the same core flow used by the provided `Unknownzop/MusicBot` source:
 
-- `commands/music.js` defines slash + prefix-compatible command contracts and help metadata.
-- `services/musicService.js` handles source resolution, voice joins, playback flow, and guardrails.
-- `services/queueService.js` manages per-guild queue state, loop mode, volume, and queue mutations.
-- `utils/musicEmbeds.js` builds premium-style playback, queue, and state embeds.
+- Riffy/Lavalink connection bootstrap and voice state forwarding.
+- `riffy.resolve(...)` for search, URL resolution, playlist loading, and provider routing, now with Serenity-side query normalization and source-aware fallbacks.
+- queue-driven playback through a persistent guild player.
+- Lavalink node lifecycle logging and queue-end cleanup.
+- the upstream Riffy node-property patch workaround adapted into Serenity’s service layer.
+
+### Serenity-native modular layout
+
+The imported foundation was refactored into Serenity’s architecture instead of flattening the repo:
+
+- `commands/music.js` keeps the slash + prefix command registry and help metadata.
+- `services/musicConfigService.js` reads Lavalink runtime configuration from environment variables.
+- `services/playerService.js` owns Riffy bootstrapping, event wiring, connection creation, resolution, and lifecycle management.
+- `services/queueService.js` provides queue/loop/volume mutations in a shared wrapper layer.
+- `services/musicService.js` stays as the command-facing orchestration layer.
+- `utils/musicEmbeds.js` renders Serenity-branded now playing, queue, queue-ended, and control response embeds.
 
 ### Supported sources
 
-Music playback is implemented with `play-dl` plus `@discordjs/voice`.
+Support depends on your Lavalink server and installed extractors/plugins, but this subsystem is designed to handle the same practical input classes as the provided source bot:
 
-Practical support includes:
+- YouTube links and searches
+- YouTube Music searches via the default `ytmsearch` platform, with `music.youtube.com` URLs normalized to standard YouTube URLs before resolution
+- SoundCloud links/searches when your Lavalink stack supports them
+- Spotify links as **metadata-only** inputs that must resolve through a Spotify-capable Lavalink source/plugin before they can fall back to another playable provider
 
-- YouTube links
-- YouTube search queries
-- Spotify track links
-- Spotify album / playlist links resolved best-effort into playable YouTube matches
-- SoundCloud tracks and playlists where provider access succeeds
+If a provider cannot be resolved, Serenity now returns clearer errors such as:
+
+- “failed to resolve a playable track”
+- “Spotify links are metadata-only here”
+- “you must join a voice channel first”
+- “queue is empty”
+- “Serenity needs Connect and Speak permissions”
 
 ### Slash commands
 
@@ -169,19 +191,27 @@ The centralized prefix trigger remains the bot name, so music works alongside th
 - Users must be in a voice channel before starting playback or using queue controls.
 - Control commands require the user to be in the same voice channel as Serenity.
 - Serenity joins the invoker’s voice channel automatically when playback begins.
-- Empty queues, invalid URLs, provider failures, and missing permissions return clean command errors instead of crashing the bot.
-- Long queues are safely truncated into paginated queue views.
+- `/play` and `Serenity play` share the same backend logic.
+- Queue state, loop mode, volume, and embeds all come from one active music subsystem only.
+- Queue-end cleanup is handled through Lavalink player events instead of the removed legacy voice code.
 - `/help` automatically includes the music commands because they are registered through shared command metadata.
 
-### Music dependencies
+### Music runtime requirements
 
-Install these runtime dependencies:
+Install the required runtime dependency:
 
 ```bash
-npm install @discordjs/voice play-dl
+npm install riffy
 ```
 
-Depending on your host environment, Discord voice may also benefit from optional native/FFmpeg acceleration packages documented by `@discordjs/voice`.
+You must also provide a reachable Lavalink node. A minimal setup needs:
+
+- a Lavalink v4-compatible server,
+- the host/port/password env vars above,
+- extractor/plugin support for the providers you want (for example a YouTube-capable source manager/plugin, optional SoundCloud support, and a Spotify source/plugin if you expect Spotify metadata resolution),
+- standard Discord voice permissions in the target voice channels.
+
+> Note: Spotify is not directly streamable by the bot. Spotify URLs must resolve to another playable source through your Lavalink stack.
 
 ## Prefix commands
 
@@ -258,55 +288,13 @@ Each welcome message includes:
 
 ### Slash command structure
 
-- `/poll embed question option1 option2 [option3...]`
-- `/poll normal question option1 option2 [option3...]`
+Use either of the supported forms:
 
-Slash polls require at least two options and support up to ten options.
-
-### Prefix command structure
-
-Use `|` as the delimiter:
-
+- `/poll embed question:<text> choices:<a | b | c>`
+- `/poll normal question:<text> choices:<a | b | c>`
 - `Serenity poll embed Best client? | Volt | Apex | Nova`
 - `Serenity poll normal Favorite mode? | Survival | PvP | Skyblock`
 
 ## Help system
 
-`/help` and `Serenity help` are generated from shared command metadata.
-
-Detailed help includes:
-
-- command name,
-- category,
-- required permissions,
-- slash usage,
-- prefix usage when supported,
-- examples,
-- response visibility.
-
-## Utility commands
-
-- `/help`
-- `/userinfo`
-- `/serverinfo`
-- `/roleinfo`
-- `/avatar`
-- `/ping`
-- `/botinfo`
-- `/poll`
-- `/yt-search`
-- `/play`
-- `/queue`
-- `/nowplaying`
-
-## YouTube system
-
-### Search
-- `/yt-search topic`
-- requires `YOUTUBE_API_KEY`
-- returns the top five results ephemerally
-
-### Notifications
-- `/yt-notify add youtube_channel_link discord_channel ping_everyone`
-- `/yt-notify remove youtube_channel_link`
-- `/yt-notify list`
+Use `/help` for the command overview or `/help command:<name>` for a detailed card. Prefix equivalents remain available anywhere prefix support is enabled.

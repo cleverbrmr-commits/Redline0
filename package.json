@@ -8,7 +8,6 @@
   "dependencies": {
     "discord.js": "^14.25.1",
     "dotenv": "^16.6.1",
-    "@discordjs/voice": "^0.18.0",
-    "play-dl": "^1.9.7"
+    "riffy": "^1.0.9"
   }
 }
