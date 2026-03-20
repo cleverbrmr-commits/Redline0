@@ -10,7 +10,8 @@ const {
   registerCommands,
 } = require('./handlers/interactionHandler');
 const { createMessageHandler } = require('./handlers/messageHandler');
-const { createGuildMemberAddHandler } = require('./handlers/guildMemberHandler');
+const { createGuildMemberAddHandler, createGuildMemberRemoveHandler } = require('./handlers/guildMemberHandler');
+const { createGuildMemberUpdateHandler, createMessageDeleteHandler, createMessageUpdateHandler } = require('./handlers/auditHandler');
 const { ensureClientsStore } = require('./storage/clientsStore');
 const { ensureConfigStorage } = require('./services/configService');
 const { ensureModerationStore } = require('./storage/moderationStore');
@@ -78,6 +79,10 @@ function attachHandlers(client, commandRegistry) {
   client.on(Events.InteractionCreate, createInteractionHandler(client, commandRegistry, PREFIX_NAME));
   client.on(Events.MessageCreate, createMessageHandler(client, commandRegistry, PREFIX_NAME));
   client.on(Events.GuildMemberAdd, createGuildMemberAddHandler(client));
+  client.on(Events.GuildMemberRemove, createGuildMemberRemoveHandler(client));
+  client.on(Events.GuildMemberUpdate, createGuildMemberUpdateHandler(client));
+  client.on(Events.MessageDelete, createMessageDeleteHandler(client));
+  client.on(Events.MessageUpdate, createMessageUpdateHandler(client));
 }
 
 function startBackgroundJobs(client) {

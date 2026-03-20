@@ -19,19 +19,10 @@ function sanitizeText(value, max) {
 }
 
 function sanitizeFooter(footer) {
-  if (!footer) {
-    return { text: BRAND.footer };
-  }
-
-  if (typeof footer === 'string') {
-    return { text: sanitizeText(footer, EMBED_LIMITS.footer) || BRAND.footer };
-  }
-
+  if (!footer) return { text: BRAND.footer };
+  if (typeof footer === 'string') return { text: sanitizeText(footer, EMBED_LIMITS.footer) || BRAND.footer };
   const text = sanitizeText(footer.text, EMBED_LIMITS.footer) || BRAND.footer;
-  return {
-    text,
-    iconURL: footer.iconURL || undefined,
-  };
+  return { text, iconURL: footer.iconURL || undefined };
 }
 
 function sanitizeAuthor(author) {
@@ -43,41 +34,21 @@ function sanitizeAuthor(author) {
 
   const name = sanitizeText(author.name, EMBED_LIMITS.author);
   if (!name) return null;
-
-  return {
-    name,
-    iconURL: author.iconURL || undefined,
-    url: author.url || undefined,
-  };
+  return { name, iconURL: author.iconURL || undefined, url: author.url || undefined };
 }
 
 function sanitizeFields(fields) {
-  if (!Array.isArray(fields) || !fields.length) {
-    return [];
-  }
-
-  return fields
-    .slice(0, EMBED_LIMITS.fields)
-    .map((field) => {
-      const name = sanitizeText(field?.name, EMBED_LIMITS.fieldName);
-      const value = sanitizeText(field?.value, EMBED_LIMITS.fieldValue);
-
-      if (!name || !value) {
-        return null;
-      }
-
-      return {
-        name,
-        value,
-        inline: Boolean(field?.inline),
-      };
-    })
-    .filter(Boolean);
+  if (!Array.isArray(fields) || !fields.length) return [];
+  return fields.slice(0, EMBED_LIMITS.fields).map((field) => {
+    const name = sanitizeText(field?.name, EMBED_LIMITS.fieldName);
+    const value = sanitizeText(field?.value, EMBED_LIMITS.fieldValue);
+    if (!name || !value) return null;
+    return { name, value, inline: Boolean(field?.inline) };
+  }).filter(Boolean);
 }
 
 function makeEmbed({ title, description, color, fields, footer, author, thumbnail, image, timestamp }) {
   const embed = new EmbedBuilder().setColor(color || brandColor());
-
   const safeTitle = sanitizeText(title, EMBED_LIMITS.title);
   const safeDescription = sanitizeText(description, EMBED_LIMITS.description);
   const safeAuthor = sanitizeAuthor(author);
@@ -87,12 +58,12 @@ function makeEmbed({ title, description, color, fields, footer, author, thumbnai
   if (safeTitle) embed.setTitle(safeTitle);
   if (safeDescription) embed.setDescription(safeDescription);
   if (safeAuthor) embed.setAuthor(safeAuthor);
+  else embed.setAuthor({ name: 'Serenity', iconURL: undefined });
   if (safeFooter) embed.setFooter(safeFooter);
   if (thumbnail) embed.setThumbnail(thumbnail);
   if (image) embed.setImage(image);
   if (timestamp !== false) embed.setTimestamp();
   if (safeFields.length) embed.addFields(safeFields);
-
   return embed;
 }
 
@@ -117,21 +88,10 @@ function makeStatusEmbed(type, { title, description, fields, footer, author, thu
   });
 }
 
-function makeSuccessEmbed(payload) {
-  return makeStatusEmbed('success', payload);
-}
-
-function makeErrorEmbed(payload) {
-  return makeStatusEmbed('error', payload);
-}
-
-function makeWarningEmbed(payload) {
-  return makeStatusEmbed('warning', payload);
-}
-
-function makeInfoEmbed(payload) {
-  return makeStatusEmbed('info', payload);
-}
+const makeSuccessEmbed = (payload) => makeStatusEmbed('success', payload);
+const makeErrorEmbed = (payload) => makeStatusEmbed('error', payload);
+const makeWarningEmbed = (payload) => makeStatusEmbed('warning', payload);
+const makeInfoEmbed = (payload) => makeStatusEmbed('info', payload);
 
 module.exports = {
   EMBED_LIMITS,

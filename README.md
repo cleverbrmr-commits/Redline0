@@ -1,16 +1,55 @@
-# REDLINE CLIENT HUB
+# Serenity for Redline Hub
 
-Redline is a modular Discord.js v14 bot for client delivery, moderation, help tooling, welcome automation, reaction polls, YouTube notifications, and a rebuilt Serenity-branded music subsystem. The architecture stays split across `commands/`, `handlers/`, `services/`, `storage/`, and `utils/`, while `index.js` remains bootstrap-only.
+Serenity is a premium, modular Discord.js v14 platform for Redline Hub. It is designed to feel like a polished multi-purpose server product: structured by modules, configurable per guild, strong in moderation and onboarding, and ready for future dashboard surfaces.
+
+`index.js` stays bootstrap-only while shared logic remains split across `commands/`, `handlers/`, `services/`, `storage/`, and `utils/`.
+
+## Premium product direction
+
+Serenity now centers around a cleaner module-first model:
+
+- **Moderation** — live staff actions, punishments, infractions, mute role management, channel controls, and tempbans.
+- **Auto Moderation** — anti-spam, anti-link, anti-invite, anti-caps, mention spam, blocked phrases, and anti-raid thresholds.
+- **Logging** — structured audit feeds for message events, member lifecycle changes, moderation actions, automod, joins/leaves, and system telemetry.
+- **Welcome & Onboarding** — branded welcome cards, goodbye cards, ping control, join roles, and configurable templates.
+- **Utility / Info** — help, server cards, user cards, and general-use commands.
+- **Polls** — polished reaction polls.
+- **Social Alerts** — YouTube search and notification workflows.
+- **Music** — Lavalink-backed queue and playback system.
+- **Client & Content** — Redline client distribution, uploads, exports, and public panels.
+- **System & Configuration** — dashboard-ready guild config, module toggles, and access controls.
 
 ## Architecture overview
 
-The current build keeps Serenity modular by design:
+### Bootstrap
+- `index.js` only performs environment loading, storage startup, command discovery, event attachment, slash registration, background job startup, and login.
 
-- `index.js` only handles environment loading, storage startup, client creation, command loading, event attachment, slash registration, subsystem boot, and login.
-- `commands/` contains user-facing slash/prefix command definitions and metadata.
-- `services/` contains shared business logic such as playback orchestration, queue state, YouTube polling, moderation, and help generation.
-- `storage/` holds persisted JSON-backed state for existing subsystems.
-- `utils/` contains shared embed builders, formatting helpers, and other reusable UI helpers.
+### Commands
+- `commands/` holds slash/prefix command definitions.
+- Commands expose metadata used by the premium help system and future dashboard surfaces:
+  - `name`
+  - `category/module`
+  - `description`
+  - `usage`
+  - `examples`
+  - `permissions`
+  - `prefixEnabled`
+  - `prefixUsage`
+  - `response`
+
+### Shared services
+- `services/moduleService.js` defines reusable module metadata and category identity.
+- `services/helpService.js` builds interactive help menus and normalized command metadata.
+- `services/configService.js` normalizes dashboard-ready guild configuration and legacy fallbacks.
+- `services/automodService.js` drives spam/link/invite/caps/mention/phrase/raid protection.
+- `services/logService.js` routes premium audit embeds to the correct channels.
+- `services/welcomerService.js` manages onboarding cards, goodbye cards, and join roles.
+
+### Event handlers
+- `handlers/messageHandler.js` processes prefix commands and live automod checks.
+- `handlers/guildMemberHandler.js` processes onboarding, goodbye flow, and raid pressure tracking.
+- `handlers/auditHandler.js` logs message edits/deletes and member updates.
+- `handlers/interactionHandler.js` handles slash commands, premium help menus, and access validation.
 
 ## Project structure
 
@@ -18,6 +57,7 @@ The current build keeps Serenity modular by design:
 index.js
 commands/
   admin.js
+  automod.js
   clientpanel.js
   clients.js
   content.js
@@ -25,6 +65,7 @@ commands/
   embed.js
   help.js
   info.js
+  logging.js
   moderation.js
   music.js
   poll.js
@@ -35,10 +76,12 @@ commands/
   welcomer.js
   youtube.js
 handlers/
+  auditHandler.js
   guildMemberHandler.js
   interactionHandler.js
   messageHandler.js
 services/
+  automodService.js
   clientService.js
   configService.js
   embedService.js
@@ -46,6 +89,7 @@ services/
   infoService.js
   logService.js
   moderationService.js
+  moduleService.js
   musicConfigService.js
   musicService.js
   panelService.js
@@ -79,7 +123,7 @@ utils/
    ```
 
 2. Create a `.env` file.
-3. Fill in the required environment variables.
+3. Fill in the required variables.
 4. Start the bot:
 
    ```bash
@@ -88,12 +132,15 @@ utils/
 
 ## Required environment variables
 
-- `DISCORD_TOKEN` — your bot token.
-- `CLIENT_ID` — your Discord application client ID.
-- `GUILD_ID` — the guild used for guild-scoped slash registration.
-- `LAVALINK_HOST` — Lavalink host for music playback.
-- `LAVALINK_PORT` — Lavalink port.
-- `LAVALINK_PASSWORD` — Lavalink password.
+- `DISCORD_TOKEN`
+- `CLIENT_ID`
+- `GUILD_ID`
+
+### Music-specific required variables
+
+- `LAVALINK_HOST`
+- `LAVALINK_PORT`
+- `LAVALINK_PASSWORD`
 
 ## Optional environment variables
 
@@ -105,198 +152,263 @@ utils/
 - `MOD_LOG_CHANNEL_ID`
 - `PRISON_LOG_CHANNEL_ID`
 - `ANNOUNCE_LOG_CHANNEL_ID`
-- `LAVALINK_SECURE` — `true` when your node uses TLS.
-- `LAVALINK_NAME` — optional display name for the single node configuration.
-- `LAVALINK_NODES` — optional JSON array of nodes instead of the single-node variables.
-- `LAVALINK_DEFAULT_SEARCH` — defaults to `ytsearch`.
-- `LAVALINK_REST_VERSION` — defaults to `v4`.
-- `MUSIC_AUTO_LEAVE_ON_QUEUE_END` — defaults to `true`.
+- `LAVALINK_SECURE`
+- `LAVALINK_NAME`
+- `LAVALINK_NODES`
+- `LAVALINK_DEFAULT_SEARCH`
+- `LAVALINK_REST_VERSION`
+- `MUSIC_AUTO_LEAVE_ON_QUEUE_END`
 
-## Music subsystem
+## Module and category system
 
-### What changed
+Serenity now uses a reusable category registry so help menus, command cards, config panels, and future dashboard pages can all read the same module metadata.
 
-The old broken `play-dl` + `@discordjs/voice` music path has been replaced with a modular Lavalink-backed system built around the same core flow used by the provided `Unknownzop/MusicBot` source:
+### Current primary modules
 
-- Riffy/Lavalink connection bootstrap and voice state forwarding.
-- `riffy.resolve(...)` for search, URL resolution, playlist loading, and provider routing.
-- queue-driven playback through a persistent guild player.
-- Lavalink node lifecycle logging and queue-end cleanup.
-- the upstream Riffy node-property patch workaround adapted into Serenity’s service layer.
+| Module | Purpose |
+| --- | --- |
+| Moderation | Punishments, warnings, locks, role actions, voice moderation |
+| Auto Moderation | Message scanning, spam defense, blocked phrases, anti-raid |
+| Logging | Audit routing for moderation, messages, members, and security |
+| Welcome & Onboarding | Welcome cards, goodbye cards, join roles, templates |
+| Utility / Info | Help, server info, user info, general tools |
+| Polls | Structured community polls |
+| Social Alerts | YouTube notifications and similar feeds |
+| Music | Queue-driven playback |
+| Client & Content | Client distribution and public panels |
+| System & Configuration | Settings, module visibility, access control preparation |
 
-### Serenity-native modular layout
+## Premium help system
 
-The imported foundation was refactored into Serenity’s architecture instead of flattening the repo:
+`/help` now acts like a module navigator instead of a text wall.
 
-- `commands/music.js` keeps the slash + prefix command registry and help metadata.
-- `services/musicConfigService.js` reads Lavalink runtime configuration from environment variables.
-- `services/playerService.js` owns Riffy bootstrapping, event wiring, connection creation, resolution, and lifecycle management.
-- `services/queueService.js` provides queue/loop/volume mutations in a shared wrapper layer.
-- `services/musicService.js` stays as the command-facing orchestration layer.
-- `utils/musicEmbeds.js` renders Serenity-branded now playing, queue, queue-ended, and control response embeds.
+### Features
+- category-driven help overview
+- module command counts
+- interactive select menu to browse modules
+- `/help command:<name>` detailed command cards
+- prefix equivalents where available
+- permissions and response visibility indicators
 
-### Supported sources
+### Example usage
+- `/help`
+- `/help command:ban`
+- `Serenity help`
+- `Serenity help automod`
 
-Support depends on your Lavalink server and installed extractors/plugins, but this subsystem is designed to handle the same practical input classes as the provided source bot:
+## Welcome & onboarding system
 
-- YouTube links and searches
-- YouTube searches via the default `ytsearch` platform
-- SoundCloud links/searches when your Lavalink stack supports them
-- Spotify links are rejected with a clear message unless you add explicit Spotify metadata/extractor support
+The welcomer is now a real onboarding module rather than a single-channel toggle.
 
-If a provider cannot be resolved, Serenity now returns clearer errors such as:
+### What it does
+- sends a branded welcome card
+- optionally pings the new member
+- can assign a join role
+- can send goodbye cards separately
+- supports editable title, subtitle, body, and goodbye templates
+- exposes preview and status flows
 
-- “invalid URL”
-- “no results found”
-- “Spotify direct playback is not supported”
-- “failed to resolve a playable YouTube track”
-- “you must join a voice channel first”
-- “queue is empty”
-- “Serenity needs Connect and Speak permissions”
+### Configuration commands
+- `/welcomer channel`
+- `/welcomer on`
+- `/welcomer off`
+- `/welcomer goodbye-channel`
+- `/welcomer goodbye-on`
+- `/welcomer goodbye-off`
+- `/welcomer role`
+- `/welcomer template`
+- `/welcomer goodbye-template`
+- `/welcomer preview`
+- `/welcomer status`
 
-### Slash commands
+### Template placeholders
+- `{user}`
+- `{user_tag}`
+- `{user_name}`
+- `{server_name}`
+- `{member_count}`
+- `{join_number}`
+- `{timestamp}`
 
-- `/play query_or_url`
-- `/pause`
-- `/resume`
-- `/skip`
-- `/stop`
-- `/queue [page]`
-- `/nowplaying`
-- `/remove position`
-- `/clear`
-- `/shuffle`
-- `/loop mode`
-- `/volume value`
-- `/leave`
+## Auto moderation and protection suite
 
-### Prefix commands
+Serenity now includes a configurable protection module with independent rules.
 
-The centralized prefix trigger remains the bot name, so music works alongside the existing Serenity command system:
+### Supported rules
+- anti-spam
+- anti-link
+- anti-invite
+- anti-caps
+- mention spam
+- blocked phrases
+- anti-raid / mass join burst detection
 
-- `Serenity play <query or url>`
-- `Serenity pause`
-- `Serenity resume`
-- `Serenity skip`
-- `Serenity stop`
-- `Serenity queue [page]`
-- `Serenity nowplaying`
-- `Serenity remove <position>`
-- `Serenity clear`
-- `Serenity shuffle`
-- `Serenity loop <off|track|queue>`
-- `Serenity volume <0-200>`
-- `Serenity leave`
+### Supported actions
+- `log`
+- `warn`
+- `delete`
+- `timeout`
+- `kick`
+- `ban`
+- `quarantine`
 
-### Music behavior rules
+### Configurable rule options
+- enable/disable
+- threshold
+- rolling window
+- action type
+- timeout duration
+- ignored channels
+- ignored roles
+- allowed roles
+- blocked phrase list
+- quarantine role
+- raid alert channel
 
-- Users must be in a voice channel before starting playback or using queue controls.
-- Control commands require the user to be in the same voice channel as Serenity.
-- Serenity joins the invoker’s voice channel automatically when playback begins.
-- `/play` and `Serenity play` share the same backend logic.
-- Queue state, loop mode, volume, and embeds all come from one active music subsystem only.
-- Queue-end cleanup is handled through Lavalink player events instead of the removed legacy voice code.
-- `/help` automatically includes the music commands because they are registered through shared command metadata.
+### Commands
+- `/automod status`
+- `/automod enable`
+- `/automod rule`
+- `/automod phrases`
+- `/automod raid`
+- `/automod quarantine`
 
-### Music runtime requirements
+Prefix equivalents are also available.
 
-Install the required runtime dependency:
+## Logging system
 
-```bash
-npm install riffy
-```
+Serenity logging now behaves like a product feature instead of a debug dump.
 
-You must also provide a reachable Lavalink node. A minimal setup needs:
+### Log streams
+- moderation actions
+- automod actions
+- message edits
+- message deletes
+- member joins
+- member leaves
+- member updates
+- command usage for elevated commands
+- content / announcement routing
 
-- a Lavalink v4-compatible server,
-- the host/port/password env vars above,
-- extractor/plugin support for the providers you want,
-- standard Discord voice permissions in the target voice channels.
+### Commands
+- `/logging status`
+- `/logging toggle`
+- `/logging set`
 
-> Note: Spotify is not directly streamable by the bot. Spotify URLs must resolve to another playable source through your Lavalink stack.
+## Punishments and infractions
+
+The existing moderation platform continues to store persistent infraction history while pairing cleanly with the new protection stack.
+
+### Available moderation actions
+- `ban`
+- `kick`
+- `timeout`
+- `unban`
+- `mute`
+- `unmute`
+- `warn`
+- `purge`
+- `slowmode`
+- `lock`
+- `unlock`
+- `softban`
+- `tempban`
+- `infractions`
+- `clearwarns`
+- `nickname`
+- `role`
+- `vckick`
+
+### Stored infraction data
+- action type
+- moderator ID
+- target user ID
+- reason
+- created timestamp
+- expiry where relevant
+- extra details for automod-driven actions
+
+## Access model and future dashboard readiness
+
+Serenity now keeps more configuration in normalized guild objects so a dashboard can map directly to module pages later.
+
+### Stored guild areas
+- module enablement state
+- log routing
+- welcome templates and toggles
+- automod rule configuration
+- command access overrides
+- legacy-compatible channel settings
+
+### Current access controls
+- Discord-native permission gates remain primary
+- command/module disable state is checked at runtime
+- per-command role/channel allow/deny overrides are supported internally through guild config
+- moderation actions still validate role hierarchy and server ownership rules
 
 ## Prefix commands
 
-The centralized message-command trigger is the bot name:
+The prefix trigger remains the bot name, case-insensitive.
 
+Examples:
 - `Serenity help`
 - `Serenity help ban`
-- `Serenity ban @user spamming`
-- `Serenity purge 15`
-- `Serenity role add @user @Member`
-- `Serenity slowmode off`
-- `Serenity welcomer set #welcome`
 - `Serenity welcomer status`
-- `Serenity avatar @user`
+- `Serenity automod status`
+- `Serenity logging set automod #security`
 - `Serenity poll embed Best client? | Volt | Apex | Nova`
-- `Serenity poll normal Favorite mode? | Survival | PvP | Skyblock`
-- `Serenity yt-notify add <youtube-url> #uploads true`
 - `Serenity play lofi hip hop`
-- `Serenity queue`
-- `Serenity skip`
-
-The leading bot name is parsed case-insensitively.
 
 ## Public vs ephemeral behavior
 
 ### Public
-- `/help`
-- `/help command`
-- `/userinfo`
-- `/serverinfo`
-- `/avatar`
-- prefix `Serenity avatar`
-- the poll message created by `/poll` or `Serenity poll`
-- moderation action confirmations, unless the command is returning a private validation / permission error.
-- `/yt-notify` confirmations and lists.
-- music control messages and queue / now playing embeds.
+- information cards like `/userinfo`, `/serverinfo`, `/avatar`
+- most moderation confirmations
+- posted polls
+- music playback responses
+- selected social alert confirmations
 
 ### Ephemeral
-- `/welcomer` configuration responses
-- `/poll` confirmation replies after the public poll is posted
-- `/yt-search`
-- validation errors where private feedback is cleaner.
-- existing content-management utilities that already work better as staff-only ephemeral tools.
+- settings and configuration commands
+- `/welcomer` admin flows
+- `/automod` configuration flows
+- `/logging` routing flows
+- `/set` system configuration
+- validation-heavy responses where private feedback is cleaner
 
-## Welcomer system
+## Music subsystem
 
-### What it does
+The Lavalink-backed Serenity music stack remains modular and unchanged in structure:
 
-The welcomer stores one config record per guild and, when enabled, sends a branded welcome embed whenever a new member joins.
+- `services/musicConfigService.js`
+- `services/playerService.js`
+- `services/queueService.js`
+- `services/musicService.js`
+- `utils/musicEmbeds.js`
 
-Each welcome message includes:
+Supported commands:
+- `/play`
+- `/pause`
+- `/resume`
+- `/skip`
+- `/stop`
+- `/queue`
+- `/nowplaying`
+- `/remove`
+- `/clear`
+- `/shuffle`
+- `/loop`
+- `/volume`
+- `/leave`
 
-- a mention of the joining user,
-- the title `Welcome to Redline Hub`,
-- a high-quality version of the member avatar,
-- server/member context such as server name, member count, and join timestamp,
-- Redline-styled branding without overloading the embed.
+## Verification ideas
 
-### Slash commands
+Before deployment, verify:
 
-- `/welcomer set channel:#welcome`
-- `/welcomer on`
-- `/welcomer off`
-- `/welcomer status`
-
-### Prefix commands
-
-- `Serenity welcomer set #welcome`
-- `Serenity welcomer on`
-- `Serenity welcomer off`
-- `Serenity welcomer status`
-
-## Poll system
-
-### Slash command structure
-
-Use either of the supported forms:
-
-- `/poll embed question:<text> choices:<a | b | c>`
-- `/poll normal question:<text> choices:<a | b | c>`
-- `Serenity poll embed Best client? | Volt | Apex | Nova`
-- `Serenity poll normal Favorite mode? | Survival | PvP | Skyblock`
-
-## Help system
-
-Use `/help` for the command overview or `/help command:<name>` for a detailed card. Prefix equivalents remain available anywhere prefix support is enabled.
+- slash registration succeeds for the new `/automod` and `/logging` modules
+- `/help` select menu loads module cards
+- welcome and goodbye cards render in configured channels
+- a blocked phrase triggers automod logging
+- message edit/delete logs route correctly
+- join bursts trigger anti-raid alerts
+- moderation commands still write infractions and logs

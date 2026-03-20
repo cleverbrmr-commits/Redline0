@@ -2,24 +2,26 @@ const { SlashCommandBuilder } = require('discord.js');
 const {
   buildHelpOverviewEmbeds,
   buildHelpCommandEmbed,
+  buildHelpOverviewComponents,
 } = require('../services/helpService');
 
 module.exports = {
   commands: [
     {
       name: 'help',
-      category: 'utility',
-      description: 'Show all commands or detailed help for one command.',
-      usage: '/help [command]',
-      examples: [
-        '/help',
-        '/help command:ban',
-        'Serenity help',
-        'Serenity help ban',
-      ],
+      metadata: {
+        category: 'system',
+        description: 'Browse Serenity modules, premium help cards, and detailed command documentation.',
+        usage: ['/help', '/help command:<name>'],
+        prefixEnabled: true,
+        prefixUsage: ['Serenity help', 'Serenity help ban'],
+        examples: ['/help', '/help command:automod', 'Serenity help welcomer'],
+        permissions: ['Everyone'],
+        response: 'public',
+      },
       data: new SlashCommandBuilder()
         .setName('help')
-        .setDescription('Show all commands or detailed help for one command')
+        .setDescription('Browse Serenity modules and detailed command help')
         .addStringOption((option) =>
           option
             .setName('command')
@@ -37,7 +39,8 @@ module.exports = {
         }
 
         const embeds = buildHelpOverviewEmbeds(commandRegistry, resolvedPrefix);
-        return interaction.reply({ embeds });
+        const components = buildHelpOverviewComponents(commandRegistry);
+        return interaction.reply({ embeds, components });
       },
 
       async executePrefix({ message, args, commandRegistry, prefixName }) {
