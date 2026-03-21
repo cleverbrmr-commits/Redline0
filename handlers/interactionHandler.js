@@ -27,7 +27,11 @@ function buildCommandRegistry(commandModules) {
 
 async function registerCommands(commandRegistry) {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-  const body = [...commandRegistry.values()].map((command) => command.data.toJSON());
+  const body = [...commandRegistry.values()].map((command) => {
+    const payload = command.data.toJSON();
+    delete payload.default_member_permissions;
+    return payload;
+  });
   console.log(`[startup] registering ${body.length} slash commands for guild ${process.env.GUILD_ID}`);
   console.log(`[startup] slash command names: ${body.map((command) => command.name).join(', ')}`);
 

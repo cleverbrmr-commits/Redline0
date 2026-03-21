@@ -236,6 +236,7 @@ Serenity now supports dashboard-ready command access overrides.
 
 ### Supported controls
 
+- internal command permission gating based on the command's configured Discord permissions,
 - role allow lists,
 - role deny lists,
 - channel allow lists,
@@ -246,7 +247,16 @@ Serenity now supports dashboard-ready command access overrides.
 - `/set access command:<name> allowed_role:@Role`
 - `/set access command:<name> denied_channel:#channel`
 
-These checks apply to both slash and prefix executions before the command body runs.
+These checks apply to both slash and prefix executions before the command body runs, so Serenity can enforce one shared access path and honor the bot owner override consistently.
+
+### Bot owner override
+
+Set `BOT_OWNER_ID` to a Discord user ID to define a single Serenity bot owner override account.
+
+- The configured owner bypasses Serenity's internal command permission gating.
+- The configured owner also bypasses command role/channel allow and deny lists.
+- Hidden client/module access role restrictions are also bypassed for that owner.
+- This override does **not** bypass Discord API-enforced limitations such as missing bot permissions, hierarchy failures, or actions Discord rejects.
 
 ## Moderation and infractions
 
@@ -332,6 +342,7 @@ This pass improves consistency by:
 ## Optional environment variables
 
 - `BOT_PREFIX_NAME`
+- `BOT_OWNER_ID`
 - `YOUTUBE_API_KEY`
 - `YOUTUBE_POLL_INTERVAL_MS`
 - `TEMPBAN_CHECK_INTERVAL_MS`

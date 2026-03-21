@@ -1,5 +1,20 @@
 const { normalizeVisibility } = require('./helpers');
 
+function getMemberLikeId(member) {
+  return member?.user?.id || member?.id || null;
+}
+
+function getBotOwnerId() {
+  const raw = String(process.env.BOT_OWNER_ID || '').trim();
+  return /^\d{16,20}$/.test(raw) ? raw : null;
+}
+
+function isBotOwner(memberOrUser) {
+  const ownerId = getBotOwnerId();
+  if (!ownerId) return false;
+  return getMemberLikeId(memberOrUser) === ownerId;
+}
+
 function canActOn(actorMember, targetMember) {
   if (!actorMember || !targetMember) return false;
   if (actorMember.id === targetMember.id) return false;
@@ -16,6 +31,7 @@ function extractRoleIds(member) {
 }
 
 function memberHasRoleAccess(member, mod) {
+  if (isBotOwner(member)) return true;
   if (!mod.accessRoleId) return true;
   return extractRoleIds(member).has(mod.accessRoleId);
 }
@@ -32,6 +48,7 @@ function isVisibleToMember(member, mod) {
 }
 
 function hasGuildPermission(member, permission) {
+  if (isBotOwner(member)) return true;
   return Boolean(member?.permissions?.has?.(permission));
 }
 
@@ -45,7 +62,9 @@ module.exports = {
   canActOn,
   ensureMemberPermission,
   extractRoleIds,
+  getBotOwnerId,
   hasGuildPermission,
+  isBotOwner,
   isVisibleToMember,
   memberHasRoleAccess,
 };
