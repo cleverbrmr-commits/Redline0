@@ -1,9 +1,49 @@
 const { getGuildConfig } = require('./configService');
 const { makeWarningEmbed } = require('../utils/embeds');
+const { isBotOwner } = require('../utils/permissions');
 
 function hasAny(ids, values) {
   const set = new Set(Array.isArray(ids) ? ids : []);
   return Array.isArray(values) ? values.some((value) => set.has(value)) : false;
+}
+
+function getRequiredPermissionBits(command) {
+  const rawBits = command?.data?.default_member_permissions ?? command?.data?.defaultMemberPermissions ?? null;
+  if (rawBits === null || rawBits === undefined || rawBits === '') return null;
+
+  try {
+    return BigInt(rawBits);
+  } catch {
+    return null;
+  }
+}
+
+function validateCommandPermissionGating(command, member) {
+  if (!command || !member) {
+    return { allowed: true };
+  }
+
+  if (isBotOwner(member)) {
+    return { allowed: true, ownerOverride: true };
+  }
+
+  const requiredPermissionBits = getRequiredPermissionBits(command);
+  if (!requiredPermissionBits) {
+    return { allowed: true };
+  }
+
+  if (member.permissions?.has?.(requiredPermissionBits)) {
+    return { allowed: true };
+  }
+
+  const requiredPermissions = command.metadata?.permissions?.length
+    ? command.metadata.permissions.join(', ')
+    : 'the required Discord permissions';
+
+  return {
+    allowed: false,
+    reason: `You need ${requiredPermissions} to use this command.`,
+  };
 }
 
 async function getCommandAccess(guildId, commandName) {
@@ -21,6 +61,11 @@ async function getCommandAccess(guildId, commandName) {
 async function validateCommandAccess({ guildId, command, member, channelId }) {
   if (!guildId || !command?.metadata?.name || !member) {
     return { allowed: true };
+  }
+
+  const permissionGate = validateCommandPermissionGating(command, member);
+  if (!permissionGate.allowed || permissionGate.ownerOverride) {
+    return permissionGate;
   }
 
   const access = await getCommandAccess(guildId, command.metadata.name);
@@ -60,4 +105,5 @@ module.exports = {
   buildAccessDeniedPayload,
   getCommandAccess,
   validateCommandAccess,
+  validateCommandPermissionGating,
 };
