@@ -144,9 +144,10 @@ The welcome system is a configurable onboarding module with template-aware styli
 
 - welcome channel,
 - enable/disable toggle,
-- customizable title/subtitle/body,
+- short configurable welcome text lines,
+- optional highlighted channel mention,
 - optional member ping,
-- avatar-based premium welcome card,
+- generated welcome card attachment with avatar, username, join text, and member count,
 - optional auto role,
 - optional goodbye channel and goodbye notices,
 - style selection (`minimal`, `premium`, `onboarding`),

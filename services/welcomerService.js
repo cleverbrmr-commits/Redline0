@@ -1,11 +1,24 @@
-const { ChannelType, Colors } = require('discord.js');
+const { ChannelType } = require('discord.js');
 const { getGuildConfig, updateGuildConfig } = require('./configService');
 const { maybeLogFeature, buildLogEmbed } = require('./logService');
-const { makeEmbed, makeInfoEmbed, makeSuccessEmbed, makeWarningEmbed } = require('../utils/embeds');
+const { makeInfoEmbed, makeSuccessEmbed, makeWarningEmbed } = require('../utils/embeds');
 const { trimText } = require('../utils/helpers');
+const { WELCOME_CARD_THEMES, createWelcomeCardAttachment, renderCardPlaceholders } = require('./welcomeCardService');
 
 const WELCOMER_FOOTER = 'SERENITY • Onboarding suite';
 const SUPPORTED_WELCOME_CHANNEL_TYPES = [ChannelType.GuildText, ChannelType.GuildAnnouncement];
+const DEFAULT_WELCOME_LINES = [
+  'Hey {user}, welcome to {server}!',
+  'Make sure to check out: {channel}',
+  'We hope you enjoy your stay here.',
+];
+
+function normalizeMessageLines(lines) {
+  const fallback = [...DEFAULT_WELCOME_LINES];
+  if (!Array.isArray(lines) || !lines.length) return fallback;
+  const next = lines.map((entry) => trimText(String(entry || '').trim(), 160)).filter(Boolean).slice(0, 3);
+  return next.length ? next : fallback;
+}
 
 function normalizeWelcomerConfig(rawConfig = {}) {
   return {
@@ -52,7 +65,7 @@ async function setGoodbyeChannel(guildId, goodbyeChannelId) {
 async function setWelcomerEnabled(guildId, enabled) {
   const current = await getWelcomerConfig(guildId);
   if (enabled && !current.channelId) {
-    throw new Error('Set a welcome channel first with `/welcomer channel` before enabling Serenity onboarding.');
+    throw new Error('Set a welcome channel first with `/welcomer set channel:#channel` before enabling Serenity onboarding.');
   }
   return saveWelcomerConfig(guildId, { enabled: Boolean(enabled) });
 }
@@ -61,32 +74,25 @@ function isSupportedWelcomeChannel(channel) {
   return Boolean(channel && SUPPORTED_WELCOME_CHANNEL_TYPES.includes(channel.type) && typeof channel.send === 'function');
 }
 
-function getWelcomeAvatarUrl(member) {
-  return member.displayAvatarURL({ extension: 'png', size: 4096, forceStatic: false });
-}
-
-function renderPlaceholders(template, member) {
-  const joinedTimestamp = `<t:${Math.floor(Date.now() / 1000)}:F>`;
-  return String(template || '')
-    .replaceAll('{user}', `${member}`)
-    .replaceAll('{server}', trimText(member.guild.name || 'this server', 80))
-    .replaceAll('{count}', String(member.guild.memberCount || 0))
-    .replaceAll('{joined}', joinedTimestamp);
+function buildWelcomeMessageContent(member, config = {}) {
+  const settings = normalizeWelcomerConfig(config);
+  return settings.messageLines
+    .map((line) => renderCardPlaceholders(line, member, settings))
+    .join('\n');
 }
 
 function buildWelcomerStatusEmbed(config) {
   const welcomer = normalizeWelcomerConfig(config);
-
   return makeInfoEmbed({
     title: 'Onboarding status',
     description: welcomer.enabled
-      ? 'Serenity onboarding is **enabled** and ready to welcome new members with a premium card layout.'
-      : 'Serenity onboarding is currently **disabled**.',
+      ? 'Serenity onboarding is enabled and will send a short welcome message with a generated welcome card image.'
+      : 'Serenity onboarding is currently disabled.',
     fields: [
       { name: 'State', value: welcomer.enabled ? 'Enabled' : 'Disabled', inline: true },
       { name: 'Welcome Channel', value: welcomer.channelId ? `<#${welcomer.channelId}>` : 'Not configured', inline: true },
-      { name: 'Goodbye Channel', value: welcomer.goodbyeChannelId ? `<#${welcomer.goodbyeChannelId}>` : 'Not configured', inline: true },
-      { name: 'Auto Role', value: welcomer.autoRoleId ? `<@&${welcomer.autoRoleId}>` : 'Not configured', inline: true },
+      { name: 'Highlight Channel', value: welcomer.highlightChannelId ? `<#${welcomer.highlightChannelId}>` : 'Not configured', inline: true },
+      { name: 'Style', value: WELCOME_CARD_THEMES[welcomer.style]?.label || welcomer.style, inline: true },
       { name: 'Ping Member', value: welcomer.pingMember ? 'Enabled' : 'Disabled', inline: true },
       { name: 'Style', value: welcomer.style, inline: true },
       { name: 'Brand Line', value: trimText(welcomer.title, 100), inline: true },
@@ -100,7 +106,7 @@ function buildWelcomerStatusEmbed(config) {
 function buildWelcomerSetEmbed(channel, type = 'welcome') {
   return makeSuccessEmbed({
     title: `${type === 'goodbye' ? 'Goodbye' : 'Welcome'} channel updated`,
-    description: `${type === 'goodbye' ? 'Departure messages' : 'New member cards'} will be posted in <#${channel.id}>.`,
+    description: `${type === 'goodbye' ? 'Departure messages' : 'Short welcome messages and card images'} will be posted in <#${channel.id}>.`,
     fields: [
       { name: 'Channel', value: `${channel}`, inline: true },
       { name: 'Type', value: channel.type === ChannelType.GuildAnnouncement ? 'Announcement' : 'Text', inline: true },
@@ -113,8 +119,8 @@ function buildWelcomerToggleEmbed(enabled, channelId) {
   return makeSuccessEmbed({
     title: enabled ? 'Onboarding enabled' : 'Onboarding disabled',
     description: enabled
-      ? `Welcome cards are now live in <#${channelId}>.`
-      : 'Welcome cards have been turned off for this server.',
+      ? `Short welcome messages and generated cards are now live in <#${channelId}>.`
+      : 'Welcome messages and cards have been turned off for this server.',
     footer: WELCOMER_FOOTER,
   });
 }
@@ -127,49 +133,23 @@ function buildWelcomerValidationEmbed(message) {
   });
 }
 
-function buildWelcomeEmbed(member, config = {}) {
-  const settings = normalizeWelcomerConfig(config);
-  const avatarUrl = getWelcomeAvatarUrl(member);
-  const memberCount = member.guild.memberCount || member.guild.members.cache.size || 0;
-  const joinedTimestamp = Math.floor(Date.now() / 1000);
-
-  return makeEmbed({
-    title: trimText(renderPlaceholders(settings.title, member), 256),
-    description: [
-      `### ${trimText(renderPlaceholders(settings.subtitle, member), 120)}`,
-      renderPlaceholders(settings.body, member),
-    ].join('\n\n'),
-    color: Colors.Blurple,
-    author: {
-      name: 'Serenity Onboarding',
-      iconURL: member.guild.iconURL({ extension: 'png', size: 512 }) || avatarUrl,
-    },
-    thumbnail: avatarUrl,
-    image: settings.includeAvatarBanner ? avatarUrl : null,
-    fields: [
-      { name: 'Member', value: `${member} • \`${member.user.id}\``, inline: false },
-      { name: 'Join Position', value: memberCount ? `#${memberCount}` : 'Unknown', inline: true },
-      { name: 'Server', value: trimText(member.guild.name || 'Redline Hub', 100), inline: true },
-      { name: 'Arrived', value: `<t:${joinedTimestamp}:F>`, inline: true },
-      { name: 'Guidance', value: 'Check the important channels, verify access, and enjoy the community.', inline: false },
-    ],
-    footer: settings.footer,
-    timestamp: true,
-  });
-}
-
 function buildGoodbyeEmbed(member, config = {}) {
   const settings = normalizeWelcomerConfig(config);
   return makeWarningEmbed({
     title: 'Member departed',
-    description: renderPlaceholders(settings.goodbyeMessage, member),
-    fields: [
-      { name: 'User', value: `${member.user.tag} • \`${member.id}\``, inline: true },
-      { name: 'Server', value: trimText(member.guild.name, 100), inline: true },
-      { name: 'Joined', value: member.joinedTimestamp ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` : 'Unknown', inline: true },
-    ],
+    description: renderCardPlaceholders(settings.goodbyeMessage, member, settings),
     footer: WELCOMER_FOOTER,
   });
+}
+
+async function buildWelcomePreviewPayload(member, config = {}) {
+  const settings = normalizeWelcomerConfig(config);
+  const attachment = await createWelcomeCardAttachment(member, settings);
+  return {
+    content: buildWelcomeMessageContent(member, settings),
+    files: [attachment],
+    allowedMentions: settings.pingMember ? { users: [member.id] } : { parse: [] },
+  };
 }
 
 async function sendWelcomeMessage(client, member) {
@@ -192,20 +172,16 @@ async function sendWelcomeMessage(client, member) {
     }
   }
 
-  await channel.send({
-    content: config.pingMember ? `${member}` : null,
-    embeds: [buildWelcomeEmbed(member, config)],
-    allowedMentions: config.pingMember ? { users: [member.id] } : { parse: [] },
-  });
+  await channel.send(await buildWelcomePreviewPayload(member, config));
 
   await maybeLogFeature(client, member.guild.id, 'members', buildLogEmbed({
     title: 'Onboarding Delivered',
-    description: `${member} received the configured welcome card.`,
+    description: `${member} received the configured short welcome message and card image.`,
     severity: 'low',
     fields: [
       { name: 'Channel', value: `<#${channel.id}>`, inline: true },
+      { name: 'Style', value: config.style, inline: true },
       { name: 'Auto Role', value: config.autoRoleId ? `<@&${config.autoRoleId}>` : 'None', inline: true },
-      { name: 'Member Count', value: String(member.guild.memberCount || 0), inline: true },
     ],
     footer: WELCOMER_FOOTER,
   }));
@@ -233,6 +209,7 @@ function buildWelcomerPrefixUsage(prefixName = 'Serenity') {
     `${prefixName} welcomer on`,
     `${prefixName} welcomer off`,
     `${prefixName} welcomer status`,
+    `${prefixName} welcomer preview`,
   ];
 }
 
@@ -245,9 +222,11 @@ function buildWelcomerUnknownActionEmbed(prefixName = 'Serenity') {
 }
 
 module.exports = {
+  DEFAULT_WELCOME_LINES,
   SUPPORTED_WELCOME_CHANNEL_TYPES,
   buildGoodbyeEmbed,
-  buildWelcomeEmbed,
+  buildWelcomeMessageContent,
+  buildWelcomePreviewPayload,
   buildWelcomerPrefixUsage,
   buildWelcomerSetEmbed,
   buildWelcomerStatusEmbed,
