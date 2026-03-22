@@ -84,6 +84,11 @@ module.exports = {
             .addBooleanOption((option) => option.setName('ping_member').setDescription('Mention the joining member'))
             .addBooleanOption((option) => option.setName('show_avatar_banner').setDescription('Use the avatar as the large card image'))
             .addBooleanOption((option) => option.setName('goodbye_enabled').setDescription('Enable goodbye cards'))
+            .addStringOption((option) => option.setName('style').setDescription('Template style').addChoices(
+              { name: 'minimal', value: 'minimal' },
+              { name: 'premium', value: 'premium' },
+              { name: 'onboarding', value: 'onboarding' },
+            ))
         )
         .addSubcommand((sub) =>
           sub
@@ -122,6 +127,7 @@ module.exports = {
             pingMember: interaction.options.getBoolean('ping_member') ?? undefined,
             includeAvatarBanner: interaction.options.getBoolean('show_avatar_banner') ?? undefined,
             goodbyeEnabled: interaction.options.getBoolean('goodbye_enabled') ?? undefined,
+            style: interaction.options.getString('style') || undefined,
           });
           return interaction.reply({ embeds: [buildWelcomerStatusEmbed(updated)], ephemeral: true });
         }
