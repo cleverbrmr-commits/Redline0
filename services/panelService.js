@@ -10,6 +10,8 @@ const {
 const { UPLOADS_DIR } = require("../storage/clientsStore");
 const { buildClientFields, getVisibleCategories, getVisibleClientEntries, loadModules } = require("./clientService");
 const { logDownload } = require("./logService");
+const { toggleRoleFromMenu } = require('./roleMenuService');
+const { claimTicket, closeTicket, createTicketFromPanel } = require('./ticketService');
 const { makeEmbed, makeInfoEmbed, makeSuccessEmbed, makeWarningEmbed } = require("../utils/embeds");
 const {
   BRAND,
@@ -338,6 +340,25 @@ async function handleStringSelect(client, interaction) {
 }
 
 async function handleButton(client, interaction) {
+
+  if (interaction.customId.startsWith('serenity:rolemenu:')) {
+    const [, , menuId, optionIndex] = interaction.customId.split(':');
+    return toggleRoleFromMenu(interaction, menuId, optionIndex);
+  }
+
+  if (interaction.customId.startsWith('serenity:ticket:create:')) {
+    const [, , , panelId] = interaction.customId.split(':');
+    return createTicketFromPanel(interaction, panelId);
+  }
+
+  if (interaction.customId.startsWith('serenity:ticket:close:')) {
+    return closeTicket(interaction);
+  }
+
+  if (interaction.customId.startsWith('serenity:ticket:claim:')) {
+    return claimTicket(interaction);
+  }
+
   if (interaction.customId.startsWith("browser_refresh:")) {
     const [, mode] = interaction.customId.split(":");
     return interaction.reply(await buildPrivateCategoryBrowserPayload(client, interaction, mode || "private", makeInfoEmbed({
