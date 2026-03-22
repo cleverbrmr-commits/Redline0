@@ -70,8 +70,8 @@ Before this expansion, Serenity already had solid foundations in moderation, aut
 
 ### Welcome / Onboarding
 
-- Replace the public metadata-heavy onboarding embed with a short friendly message plus a generated welcome card image attachment.
-- Add style-aware card rendering, lightweight text lines, and admin preview controls.
+- Extend the onboarding config model with template style awareness.
+- Preserve premium welcome cards and add a style layer that is consistent with the template system.
 
 ### Tickets / Support
 
@@ -127,7 +127,6 @@ Before this expansion, Serenity already had solid foundations in moderation, aut
 - `services/panelService.js`
 - `services/accessService.js`
 - `services/welcomerService.js`
-- `services/welcomeCardService.js`
 - `handlers/messageHandler.js`
 - `commands/set.js`
 - `commands/welcomer.js`

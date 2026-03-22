@@ -101,13 +101,13 @@ module.exports = {
             .addStringOption((option) => option.setName('line_three').setDescription('Third welcome line'))
             .addChannelOption((option) => option.setName('highlight_channel').setDescription('Channel mention used in the text message').addChannelTypes(...SUPPORTED_WELCOME_CHANNEL_TYPES))
             .addBooleanOption((option) => option.setName('ping_member').setDescription('Mention the joining member'))
-            .addStringOption((option) => option.setName('style').setDescription('Card theme').addChoices(...STYLE_CHOICES))
-            .addStringOption((option) => option.setName('background_image_url').setDescription('Optional image URL for the card background'))
-            .addStringOption((option) => option.setName('text_color').setDescription('Optional 6-digit hex color for main text'))
-            .addBooleanOption((option) => option.setName('show_member_count').setDescription('Show the member count on the card'))
-            .addBooleanOption((option) => option.setName('show_avatar').setDescription('Show the member avatar on the card'))
-            .addBooleanOption((option) => option.setName('show_join_text').setDescription('Show the join sentence on the card'))
-            .addBooleanOption((option) => option.setName('goodbye_enabled').setDescription('Enable goodbye messages'))
+            .addBooleanOption((option) => option.setName('show_avatar_banner').setDescription('Use the avatar as the large card image'))
+            .addBooleanOption((option) => option.setName('goodbye_enabled').setDescription('Enable goodbye cards'))
+            .addStringOption((option) => option.setName('style').setDescription('Template style').addChoices(
+              { name: 'minimal', value: 'minimal' },
+              { name: 'premium', value: 'premium' },
+              { name: 'onboarding', value: 'onboarding' },
+            ))
         )
         .addSubcommand((sub) =>
           sub
@@ -156,6 +156,7 @@ module.exports = {
             showAvatar: interaction.options.getBoolean('show_avatar') ?? undefined,
             showJoinText: interaction.options.getBoolean('show_join_text') ?? undefined,
             goodbyeEnabled: interaction.options.getBoolean('goodbye_enabled') ?? undefined,
+            style: interaction.options.getString('style') || undefined,
           });
           return interaction.reply({ embeds: [buildWelcomerStatusEmbed(updated)], ephemeral: true });
         }

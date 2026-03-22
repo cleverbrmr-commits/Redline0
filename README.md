@@ -60,8 +60,7 @@ Every command now resolves into one intentional Serenity module. These modules d
 - `services/ticketService.js` manages reusable ticket panels and ticket button flows.
 - `services/automodService.js` powers automod rules and anti-raid detection.
 - `services/logService.js` formats structured audit embeds and routes them to configured channels.
-- `services/welcomerService.js` manages short welcome-message delivery, onboarding settings, and admin previews.
-- `services/welcomeCardService.js` renders the generated welcome-card image attachment used in public onboarding messages.
+- `services/welcomerService.js` manages premium welcome/goodbye flows and onboarding settings.
 
 ### Storage
 
@@ -139,7 +138,7 @@ This prevents feature settings from being scattered or hardcoded and makes futur
 
 ## Onboarding and welcome system
 
-The welcome system is now a configurable onboarding module built around a short chat message plus a generated welcome card image.
+The welcome system is a configurable onboarding module with template-aware styling.
 
 ### Features
 
@@ -151,17 +150,14 @@ The welcome system is now a configurable onboarding module built around a short 
 - generated welcome card attachment with avatar, username, join text, and member count,
 - optional auto role,
 - optional goodbye channel and goodbye notices,
-- card themes (`dark-clean`, `blue-premium`, `minimal`, `neon-dark`),
-- optional background image URL and text color override,
-- toggles for member count, avatar, and join text visibility,
-- preview/status visibility for admins.
+- style selection (`minimal`, `premium`, `onboarding`),
+- status visibility for admins.
 
 ### Commands
 
 - `/welcomer set channel:#welcome`
 - `/welcomer goodbye channel:#farewell`
-- `/welcomer templates line_one:<text> line_two:<text> line_three:<text> style:<style>`
-- `/welcomer preview`
+- `/welcomer templates ... style:<style>`
 - `/welcomer role role:@Member`
 - `/welcomer on`
 - `/welcomer off`
