@@ -68,6 +68,13 @@ async function validateCommandAccess({ guildId, command, member, channelId }) {
     return permissionGate;
   }
 
+  const guildConfig = await getGuildConfig(guildId);
+  const moduleKey = command.metadata?.category;
+  const moduleConfig = moduleKey ? guildConfig.modules?.[moduleKey] : null;
+  if (moduleConfig && moduleConfig.enabled === false) {
+    return { allowed: false, reason: 'That Serenity module is currently disabled in this server.' };
+  }
+
   const access = await getCommandAccess(guildId, command.metadata.name);
   const memberRoleIds = member.roles?.cache ? [...member.roles.cache.keys()] : [];
 

@@ -8,6 +8,7 @@ const MODULES = {
     emoji: '🛡️',
     description: 'Core staff actions, sanctions, and infraction history.',
     accent: 'Staff Tools',
+    dashboardSection: 'Moderation',
   },
   automod: {
     key: 'automod',
@@ -15,6 +16,7 @@ const MODULES = {
     emoji: '🤖',
     description: 'Automated message safety, filters, thresholds, and escalations.',
     accent: 'Safety Engine',
+    dashboardSection: 'Automod',
   },
   logging: {
     key: 'logging',
@@ -22,6 +24,7 @@ const MODULES = {
     emoji: '🗂️',
     description: 'Structured audit trails for member activity, staff actions, and protection events.',
     accent: 'Audit Trail',
+    dashboardSection: 'Logging',
   },
   onboarding: {
     key: 'onboarding',
@@ -29,6 +32,7 @@ const MODULES = {
     emoji: '👋',
     description: 'Join and leave experiences, onboarding messaging, and starter role automation.',
     accent: 'Member Journey',
+    dashboardSection: 'Welcome',
   },
   utility: {
     key: 'utility',
@@ -36,6 +40,7 @@ const MODULES = {
     emoji: '🧰',
     description: 'Everyday server tools, lookups, and quick productivity commands.',
     accent: 'Daily Tools',
+    dashboardSection: 'Utility',
   },
   info: {
     key: 'info',
@@ -43,6 +48,7 @@ const MODULES = {
     emoji: '📊',
     description: 'Profiles, server stats, runtime insights, and status summaries.',
     accent: 'Insights',
+    dashboardSection: 'Stats',
   },
   polls: {
     key: 'polls',
@@ -50,6 +56,7 @@ const MODULES = {
     emoji: '📮',
     description: 'Structured public voting experiences and community prompts.',
     accent: 'Community Votes',
+    dashboardSection: 'Polls',
   },
   roles: {
     key: 'roles',
@@ -57,6 +64,7 @@ const MODULES = {
     emoji: '🎛️',
     description: 'Role-driven access, menus, and role workflow utilities.',
     accent: 'Access Control',
+    dashboardSection: 'Role Menus',
   },
   alerts: {
     key: 'alerts',
@@ -64,6 +72,7 @@ const MODULES = {
     emoji: '📺',
     description: 'External content subscriptions and announcement delivery.',
     accent: 'Notifications',
+    dashboardSection: 'Social Alerts',
   },
   music: {
     key: 'music',
@@ -71,6 +80,7 @@ const MODULES = {
     emoji: '🎵',
     description: 'Voice playback, queue controls, and music session management.',
     accent: 'Audio',
+    dashboardSection: 'Music',
   },
   content: {
     key: 'content',
@@ -78,6 +88,7 @@ const MODULES = {
     emoji: '📦',
     description: 'Client delivery, panels, uploads, exports, and content operations.',
     accent: 'Content Ops',
+    dashboardSection: 'Content',
   },
   support: {
     key: 'support',
@@ -85,6 +96,7 @@ const MODULES = {
     emoji: '🎫',
     description: 'Support workflow entry points and staff assistance features.',
     accent: 'Support',
+    dashboardSection: 'Tickets',
   },
   system: {
     key: 'system',
@@ -92,6 +104,7 @@ const MODULES = {
     emoji: '⚙️',
     description: 'Module setup, channels, defaults, toggles, and bot-wide guild configuration.',
     accent: 'Configuration',
+    dashboardSection: 'Overview',
   },
   admin: {
     key: 'admin',
@@ -99,6 +112,7 @@ const MODULES = {
     emoji: '👑',
     description: 'Higher-privilege administrative workflows and controlled broadcasts.',
     accent: 'Administrative',
+    dashboardSection: 'Commands',
   },
 };
 
@@ -192,6 +206,7 @@ function normalizeCommandMetadata(command) {
   const prefixEnabled = metadata.prefixEnabled !== false && (typeof command.executePrefix === 'function' || metadata.prefixEnabled === true);
   const prefixUsage = toArray(metadata.prefixUsage || command.prefixUsage || (prefixEnabled ? [`Serenity ${name}`] : []));
   const response = metadata.response || command.response || 'public';
+  const configDependencies = toArray(metadata.configDependencies || command.configDependencies);
 
   return {
     name,
@@ -206,6 +221,7 @@ function normalizeCommandMetadata(command) {
     prefixEnabled,
     prefixUsage,
     restrictions: toArray(metadata.restrictions || command.restrictions),
+    configDependencies,
     public: !String(response).toLowerCase().includes('ephemeral'),
     ephemeral: String(response).toLowerCase().includes('ephemeral'),
   };

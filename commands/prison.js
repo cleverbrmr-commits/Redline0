@@ -2,7 +2,7 @@ const { ChannelType, Colors, PermissionFlagsBits, SlashCommandBuilder } = requir
 const { loadPrisonState, savePrisonState } = require('../storage/clientsStore');
 const { logAnnouncement, logPrison } = require('../services/logService');
 const { makeEmbed, makeInfoEmbed, makeSuccessEmbed, makeWarningEmbed } = require('../utils/embeds');
-const { PRISON_ROLE_NAME, brandEmoji, pick, resolveInteractionContext, trimText } = require('../utils/helpers');
+const { PRISON_ROLE_NAME, brandEmoji, resolveInteractionContext, trimText } = require('../utils/helpers');
 const { canActOn } = require('../utils/permissions');
 
 async function ensurePrisonRole(guild) {
@@ -202,37 +202,57 @@ module.exports = {
       name: 'announce',
       metadata: {
         category: 'admin',
-        description: 'Send a styled announcement and optionally ping everyone.',
-        usage: ['/announce title:<title> message:<message>'],
+        description: 'Send premium broadcast cards with style presets, controlled pings, and cleaner public-facing presentation.',
+        usage: ['/announce title:<title> message:<message> style:<broadcast|update|alert|community>'],
         prefixEnabled: false,
-        examples: ['/announce title:Maintenance message:Servers restart at 8 PM UTC'],
+        examples: ['/announce title:Maintenance message:Servers restart at 8 PM UTC style:alert ping:here'],
         permissions: ['Manage Guild'],
         response: 'public',
+        configDependencies: ['modules.announcements', 'modules.templates.defaults.announcement'],
       },
       data: new SlashCommandBuilder()
         .setName('announce')
         .setDescription('Send a styled announcement and ping everyone')
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
         .addStringOption((option) => option.setName('title').setDescription('Announcement title').setRequired(true))
-        .addStringOption((option) => option.setName('message').setDescription('Announcement body').setRequired(true)),
+        .addStringOption((option) => option.setName('message').setDescription('Announcement body').setRequired(true))
+        .addStringOption((option) => option.setName('style').setDescription('Announcement style').addChoices(
+          { name: 'broadcast', value: 'broadcast' },
+          { name: 'update', value: 'update' },
+          { name: 'alert', value: 'alert' },
+          { name: 'community', value: 'community' },
+        ))
+        .addStringOption((option) => option.setName('ping').setDescription('Optional ping mode').addChoices(
+          { name: 'none', value: 'none' },
+          { name: 'here', value: 'here' },
+          { name: 'everyone', value: 'everyone' },
+        ))
+        .addStringOption((option) => option.setName('footer').setDescription('Optional footer line'))
+        .addStringOption((option) => option.setName('thumbnail').setDescription('Optional thumbnail image URL')),
       async execute({ client, interaction }) {
         const title = interaction.options.getString('title', true);
         const message = interaction.options.getString('message', true);
-        const styles = [
-          { prefix: '⚡ Breaking', footer: 'REDLINE • Announcement Drop', color: Colors.Red },
-          { prefix: '🔥 Live Update', footer: 'REDLINE • Signal Boosted', color: Colors.OrangeRed },
-          { prefix: '🚀 Heads Up', footer: 'REDLINE • Server Broadcast', color: Colors.Blurple },
-          { prefix: '🩸 REDLINE Notice', footer: 'REDLINE • Priority Broadcast', color: Colors.Gold },
-        ];
-        const style = pick(styles);
-        const guildName = interaction.guild?.name || 'Redline Hub';
+        const styleKey = interaction.options.getString('style') || 'broadcast';
+        const pingMode = interaction.options.getString('ping') || 'none';
+        const footer = interaction.options.getString('footer');
+        const thumbnail = interaction.options.getString('thumbnail');
+        const styles = {
+          broadcast: { prefix: 'Broadcast', footer: 'SERENITY • Broadcast center', color: Colors.Blurple },
+          update: { prefix: 'Update', footer: 'SERENITY • Changelog stream', color: Colors.Green },
+          alert: { prefix: 'Alert', footer: 'SERENITY • Priority notice', color: Colors.Red },
+          community: { prefix: 'Community', footer: 'SERENITY • Community board', color: Colors.Gold },
+        };
+        const style = styles[styleKey] || styles.broadcast;
+        const guildName = interaction.guild?.name || 'Serenity';
         const postedAt = Math.floor(Date.now() / 1000);
         const body = trimText(message, 3500);
+        const pingContent = pingMode === 'everyone' ? '@everyone' : pingMode === 'here' ? '@here' : null;
+        const allowedMentions = pingMode === 'everyone' ? { parse: ['everyone'] } : pingMode === 'here' ? { parse: ['everyone'] } : { parse: [] };
 
         await logAnnouncement(client, interaction, title);
         return interaction.reply({
-          content: '@everyone',
-          allowedMentions: { parse: ['everyone'] },
+          content: pingContent,
+          allowedMentions,
           embeds: [makeEmbed({
             title: `${style.prefix} • ${trimText(title, 220)}`,
             description: body,
@@ -244,10 +264,12 @@ module.exports = {
               { name: 'Posted By', value: `${interaction.user}`, inline: true },
               { name: 'Channel', value: `${interaction.channel}`, inline: true },
               { name: 'Published', value: `<t:${postedAt}:F>`, inline: true },
+              { name: 'Style', value: styleKey, inline: true },
+              { name: 'Ping', value: pingMode, inline: true },
             ],
-            footer: style.footer,
+            footer: footer || style.footer,
             color: style.color,
-            thumbnail: interaction.guild?.iconURL({ extension: 'png', size: 512 }) || null,
+            thumbnail: thumbnail || interaction.guild?.iconURL({ extension: 'png', size: 512 }) || null,
           })],
         });
       },

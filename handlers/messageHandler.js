@@ -1,5 +1,6 @@
 const { validateCommandAccess } = require('../services/accessService');
 const { handleAutomodMessage } = require('../services/automodService');
+const { maybeHandleAutoresponder } = require('../services/automationService');
 const { parsePrefixInvocation } = require('../services/prefixService');
 const { logCommandUsage } = require('../services/logService');
 const { makeWarningEmbed } = require('../utils/embeds');
@@ -11,6 +12,10 @@ function createMessageHandler(client, commandRegistry, prefixName) {
 
     await handleAutomodMessage(client, message).catch((error) => {
       console.error('Automod message handling failed:', error);
+    });
+
+    await maybeHandleAutoresponder(client, message).catch((error) => {
+      console.error('Autoresponder handling failed:', error);
     });
 
     const invocation = parsePrefixInvocation(message.content, prefixName);

@@ -133,11 +133,13 @@ function buildHelpCommandEmbed(commandRegistry, query, prefixName = 'Serenity') 
     fields: [
       { name: 'Module', value: `${module.emoji} ${module.label}`, inline: true },
       { name: 'Response', value: command.metadata?.response || 'public', inline: true },
+      { name: 'Dashboard', value: module.dashboardSection || module.label, inline: true },
       { name: 'Permissions', value: trimText(getCommandPermissions(command), FIELD_LIMIT), inline: true },
       { name: 'Slash Usage', value: usage, inline: false },
       { name: 'Prefix Usage', value: prefixUsage, inline: false },
       { name: 'Examples', value: examples, inline: false },
       { name: 'Aliases', value: command.metadata?.aliases?.length ? command.metadata.aliases.map((alias) => `\`${alias}\``).join(', ') : 'None', inline: false },
+      { name: 'Config Dependencies', value: command.metadata?.configDependencies?.length ? command.metadata.configDependencies.map((entry) => `• ${trimText(entry, 180)}`).join('\n') : 'No configuration prerequisites documented.', inline: false },
       { name: 'Restrictions', value: command.metadata?.restrictions?.length ? command.metadata.restrictions.map((entry) => `• ${trimText(entry, 180)}`).join('\n') : 'No extra restrictions documented.', inline: false },
     ],
     footer: `SERENITY • ${command.metadata?.prefixEnabled ? 'Slash + prefix ready' : 'Slash only'}`,
